@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
+    />
+    <title>{{ share_meta.title if share_meta else "Живая карта интересов" }}</title>
+    <meta property="og:title" content="{{ share_meta.title if share_meta else 'Живая карта интересов' }}" />
+    <meta property="og:description" content="{{ share_meta.description if share_meta else 'Открытая карта событий в реальном времени' }}" />
+    <meta property="og:image" content="{{ share_meta.image if share_meta else 'https://example.com/static/img/og-default.png' }}" />
+    <meta property="og:url" content="{{ share_meta.url if share_meta else request.url }}" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css"
+      integrity="sha256-Sf0x30eJ8aPI1e5k3A1w3NYWe+Y8+XoPD5Lw5+5R2X0="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
+  </head>
+  <body>
+      <div class="page-shell">
+        <header class="filter-panel">
+          <div class="panel-handle-container" role="button" aria-label="Переключить панель фильтров" tabindex="0">
+            <div class="panel-handle" aria-hidden="true"></div>
+          </div>
+          <div class="category-chips">
+            {% for group in categories %}
+            <button
+              class="category-chip"
+              data-category-slug="{{ group.slug }}"
+              style="--chip-color: {{ group.color }}"
+              data-color="{{ group.color }}"
+              data-icon="{{ group.icon }}"
+              aria-pressed="false"
+            >
+              <span class="category-chip__icon">{{ group.icon }}</span>
+              <span class="category-chip__label">{{ group.label }}</span>
+              <span class="category-count">0</span>
+            </button>
+            {% endfor %}
+            <button class="btn reset-btn" id="reset-btn">✖️ Сброс</button>
+          </div>
+          <div class="filter-panel__actions" aria-label="Панель управления фильтрами">
+            <button
+              id="show-all-btn"
+              class="show-all-btn"
+              type="button"
+              aria-label="Показать все категории"
+            >
+              <span class="show-all-btn__icon" aria-hidden="true">ALL</span>
+            </button>
+            <button
+              id="refresh-btn"
+              class="refresh-btn"
+              type="button"
+              aria-label="Обновить метки"
+            >
+              <span class="refresh-btn__icon" aria-hidden="true">🔄</span>
+            </button>
+          </div>
+        </header>
+    <main class="map-shell">
+      <div id="leaflet-map"></div>
+    </main>
+  </div>
+  <script id="live-map-bootstrap" type="application/json">
+    {{ bootstrap_json | safe }}
+  </script>
+  <script id="category-definitions" type="application/json">
+    {{ categories | tojson | safe }}
+  </script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+  <script src="{{ url_for('static', filename='js/map.js') }}" defer></script>
+</body>
+</html>
