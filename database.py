@@ -28,12 +28,21 @@ def _sqlite_kwargs(url: str) -> dict:
     return {}
 
 
-ENGINE = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,
-    future=True,
+engine_kwargs = {
+    "pool_pre_ping": True,
+    "future": True,
     **_sqlite_kwargs(DATABASE_URL),
-)
+}
+
+if DATABASE_URL.startswith("postgres"):
+    try:  # Lazy import для Postgres-соединений на Render
+        import psycopg2  # type: ignore  # noqa: F401
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError(
+            "psycopg2-binary должен быть установлен для подключения к Postgres"
+        ) from exc
+
+ENGINE = create_engine(DATABASE_URL, **engine_kwargs)
 
 SessionLocal = sessionmaker(bind=ENGINE, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
 
