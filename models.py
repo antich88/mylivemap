@@ -4,7 +4,8 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timezone, timedelta
 import json
 import secrets
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
+from uuid import uuid4
 
 from config import CATEGORY_DEFINITIONS, LOCAL_PINS_PATH, is_local_mode, ttl_for
 from database import LocalPinStore, pins_table, session_scope
@@ -20,6 +21,46 @@ def _coerce_dt(value):
     if isinstance(value, datetime):
         return value
     return datetime.fromisoformat(value)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_metadata(raw: Any) -> Dict[str, Any]:
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            return {}
+    if isinstance(raw, dict):
+        return dict(raw)
+    return {}
+
+
+def _make_comment_entry(user_id: str, text: str) -> Dict[str, str]:
+    return {
+        "id": uuid4().hex,
+        "user_id": user_id,
+        "text": text,
+        "timestamp": _now_iso(),
+    }
+
+
+def _remove_comment_entry(
+    metadata: Dict[str, Any], comment_id: str, user_id: str
+) -> Tuple[str, Dict[str, Any]]:
+    payload = _ensure_comments_container(metadata)
+    comments = payload.get("comments", [])
+    target_id = str(comment_id or "")
+    for idx, entry in enumerate(list(comments)):
+        if str(entry.get("id") or "") != target_id:
+            continue
+        if str(entry.get("user_id") or "") != str(user_id or ""):
+            return "forbidden", payload
+        del comments[idx]
+        return "ok", payload
+    return "not_found", payload
 
 
 @dataclass
@@ -62,15 +103,149 @@ class Pin:
         payload["metadata"] = self.metadata or {}
         payload["category"] = self.category
         payload["user_id"] = self.user_id
+        payload["comments"] = self.comments
         return payload
+
+    @property
+    def comments(self) -> List[Dict[str, str]]:
+        metadata = self.metadata or {}
+        return _normalize_comments(metadata.get("comments"))
+
+
+def _normalize_comments(raw_comments: Any) -> List[Dict[str, str]]:
+    if not isinstance(raw_comments, list):
+        return []
+    normalized: List[Dict[str, str]] = []
+    for entry in raw_comments:
+        if not isinstance(entry, dict):
+            continue
+        normalized.append(
+            {
+                "id": str(entry.get("id") or ""),
+                "user_id": str(entry.get("user_id") or ""),
+                "text": str(entry.get("text") or ""),
+                "timestamp": str(entry.get("timestamp") or ""),
+            }
+        )
+    return normalized
+
+
+def _ensure_comments_container(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    payload = dict(metadata or {})
+    comments = payload.get("comments")
+    if not isinstance(comments, list):
+        payload["comments"] = []
+    else:
+        payload["comments"] = _normalize_comments(comments)
+    return payload
+
+
+def add_comment(pin_id: int, user_id: str, text: str) -> Optional[List[Dict[str, str]]]:
+    """Append a comment to a pin and return updated comments list."""
+    cleaned_text = (text or "").strip()
+    if not cleaned_text:
+        raise ValueError("Text must be provided")
+
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        pins = list(snapshot.get("pins", []))
+        target_idx = None
+        now = datetime.now(timezone.utc)
+        for idx, record in enumerate(pins):
+            if int(record.get("id", 0)) != pin_id:
+                continue
+            if not _pin_is_active(record, now):
+                return None
+            target_idx = idx
+            break
+        if target_idx is None:
+            return None
+        record = dict(pins[target_idx])
+        payload = _ensure_comments_container(record.get("metadata") or {})
+        entry = _make_comment_entry(user_id, cleaned_text)
+        payload["comments"].append(entry)
+        record["metadata"] = payload
+        pins[target_idx] = _serialize_local_record(record)
+        snapshot["pins"] = pins
+        _LOCAL_STORE.persist(snapshot)
+        return _normalize_comments(payload["comments"])
+
+    from sqlalchemy import select, update
+
+    with session_scope() as session:
+        stmt = select(pins_table.c.metadata, pins_table.c.expires_at).where(pins_table.c.id == pin_id)
+        row = session.execute(stmt).mappings().first()
+        if not row:
+            return None
+        expires_at = _coerce_dt(row.get("expires_at"))
+        if expires_at and expires_at <= datetime.now(timezone.utc):
+            return None
+        payload = _ensure_comments_container(_parse_metadata(row.get("metadata")))
+        entry = _make_comment_entry(user_id, cleaned_text)
+        payload["comments"].append(entry)
+        update_stmt = (
+            update(pins_table)
+            .where(pins_table.c.id == pin_id)
+            .values(metadata=json.dumps(payload))
+        )
+        session.execute(update_stmt)
+    return _normalize_comments(payload["comments"])
+
+
+def delete_comment(
+    pin_id: int, user_id: str, comment_id: str
+) -> Tuple[str, Optional[List[Dict[str, str]]]]:
+    """Delete comment if author matches. Returns (status, updated_comments/None)."""
+
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        pins = list(snapshot.get("pins", []))
+        target_idx = None
+        now = datetime.now(timezone.utc)
+        for idx, record in enumerate(pins):
+            if int(record.get("id", 0)) != pin_id:
+                continue
+            if not _pin_is_active(record, now):
+                return ("pin_not_found", None)
+            target_idx = idx
+            break
+        if target_idx is None:
+            return ("pin_not_found", None)
+        record = dict(pins[target_idx])
+        payload = _ensure_comments_container(record.get("metadata") or {})
+        status, updated_payload = _remove_comment_entry(payload, comment_id, user_id)
+        if status != "ok":
+            return (status, None)
+        record["metadata"] = updated_payload
+        pins[target_idx] = _serialize_local_record(record)
+        snapshot["pins"] = pins
+        _LOCAL_STORE.persist(snapshot)
+        return ("ok", _normalize_comments(updated_payload.get("comments", [])))
+
+    from sqlalchemy import select, update
+
+    with session_scope() as session:
+        stmt = select(pins_table.c.metadata, pins_table.c.expires_at).where(pins_table.c.id == pin_id)
+        row = session.execute(stmt).mappings().first()
+        if not row:
+            return ("pin_not_found", None)
+        expires_at = _coerce_dt(row.get("expires_at"))
+        if expires_at and expires_at <= datetime.now(timezone.utc):
+            return ("pin_not_found", None)
+        payload = _ensure_comments_container(_parse_metadata(row.get("metadata")))
+        status, updated_payload = _remove_comment_entry(payload, comment_id, user_id)
+        if status != "ok":
+            return (status, None)
+        update_stmt = (
+            update(pins_table)
+            .where(pins_table.c.id == pin_id)
+            .values(metadata=json.dumps(updated_payload))
+        )
+        session.execute(update_stmt)
+    return ("ok", _normalize_comments(updated_payload.get("comments", [])))
 def _mapping_to_pin(row: Mapping[str, Any]) -> Pin:
     raw_metadata = row.get("metadata")
-    if isinstance(raw_metadata, str):
-        metadata_payload = json.loads(raw_metadata) if raw_metadata else None
-    elif isinstance(raw_metadata, dict):
-        metadata_payload = raw_metadata
-    else:
-        metadata_payload = None
+    metadata_payload = _parse_metadata(raw_metadata)
 
     created_at = _coerce_dt(row.get("created_at")) or datetime.now(timezone.utc)
 
@@ -87,7 +262,7 @@ def _mapping_to_pin(row: Mapping[str, Any]) -> Pin:
         created_at=created_at,
         expires_at=_coerce_dt(row.get("expires_at")),
         rating=int(row.get("rating", 0)),
-        metadata=metadata_payload,
+        metadata=_ensure_comments_container(metadata_payload),
         shared_token=row.get("shared_token"),
         user_id=str(row.get("user_id") or ""),
     )
@@ -102,6 +277,7 @@ def _serialize_local_record(record: Dict[str, Any]) -> Dict[str, Any]:
     payload = dict(record)
     created_at = payload.get("created_at")
     expires_at = payload.get("expires_at")
+    payload["metadata"] = _ensure_comments_container(payload.get("metadata") or {})
     if isinstance(created_at, datetime):
         payload["created_at"] = created_at.isoformat()
     if isinstance(expires_at, datetime):
@@ -125,7 +301,7 @@ def create_pin(
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(seconds=ttl) if ttl else None
     token = secrets.token_urlsafe(12)
-    payload = metadata or {}
+    payload = _ensure_comments_container(metadata)
 
     print(f"create_pin: {category=} {category_slug=} {subcategory_slug=} {nickname=} {lat=} {lng=}")
 

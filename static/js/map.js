@@ -10,12 +10,14 @@ const allCategorySlugs = categoriesData.map((group) => group.slug).filter(Boolea
 const LIVE_MAP_USER_ID_STORAGE_KEY = 'liveMapUserId';
 const SHOW_ALL_MODES = { ALL: 'all', OFF: 'off' };
 const AUTO_REFRESH_INTERVAL = 60_000;
+const COMMENT_POLL_INTERVAL = 6_000;
 const USER_MARKER_LIMIT = 5;
 const baseStrokeOpacity = 0.9;
 const baseFillOpacity = 0.6;
 const MOBILE_BREAKPOINT_PX = 768;
 const USER_LIMIT_MESSAGE = 'Вы достигли лимита в 5 меток. Пожалуйста, удалите старую или дождитесь её исчезновения.';
 const POPUP_REOPEN_GUARD_MS = 200;
+const COMMENT_MAX_LENGTH = 500;
 
 window.currentCreationMarker = null;
 window.userLocationMarker = null;
@@ -27,10 +29,15 @@ let showAllMode = SHOW_ALL_MODES.OFF;
 let showAllBtn = null;
 let refreshBtn = null;
 let autoRefreshTimerId = null;
+let refreshInFlightPromise = null;
+const commentPollers = new Map();
+const commentStateCache = new Map();
+const commentScrollState = new Map();
 let categoryChips = [];
 let userToastTimeoutId = null;
 let lastNonCreationPopupCloseAt = 0;
 let filterPanelElement = null;
+let filterPanelMinimizeDepth = 0;
 let currentAuthUser = bootstrapData.current_user || null;
 let authToggleBtn = null;
 let authPanelElement = null;
@@ -63,20 +70,62 @@ function expandFilterPanel() {
   panel.classList.remove('minimized');
 }
 
-function minimizeFilterPanelForCreation() {
-  const panel = getFilterPanelElement();
-  if (!panel || !isMobileViewport()) {
+function minimizeFilterPanelForMobile(reason = 'generic') {
+  if (!isMobileViewport()) {
     return;
   }
-  panel.classList.add('minimized');
-}
-
-function restoreFilterPanelAfterCreation() {
   const panel = getFilterPanelElement();
   if (!panel) {
     return;
   }
-  panel.classList.remove('minimized');
+  filterPanelMinimizeDepth = Math.max(0, filterPanelMinimizeDepth) + 1;
+  panel.dataset.minimizeReason = reason;
+  panel.classList.add('minimized');
+}
+
+function releaseFilterPanelForMobile() {
+  const panel = getFilterPanelElement();
+  if (!panel) {
+    return;
+  }
+  filterPanelMinimizeDepth = Math.max(0, filterPanelMinimizeDepth - 1);
+  if (filterPanelMinimizeDepth === 0) {
+    delete panel.dataset.minimizeReason;
+    panel.classList.remove('minimized');
+  }
+}
+
+function minimizeFilterPanelForCreation() {
+  minimizeFilterPanelForMobile('creation');
+}
+
+function restoreFilterPanelAfterCreation() {
+  releaseFilterPanelForMobile();
+}
+
+function minimizeFilterPanelForPinPopup() {
+  minimizeFilterPanelForMobile('pin-popup');
+}
+
+function restoreFilterPanelAfterPinPopup() {
+  releaseFilterPanelForMobile();
+}
+
+function centerPinPopupOnMobile(pinId) {
+  if (!isMobileViewport() || !pinId) {
+    return;
+  }
+  requestAnimationFrame(() => {
+    const popupEl = document.querySelector(`.pin-popup[data-pin-id="${pinId}"]`);
+    if (!popupEl) {
+      return;
+    }
+    try {
+      popupEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } catch (_error) {
+      popupEl.scrollIntoView({ block: 'center' });
+    }
+  });
 }
 
 function colorForCategorySlug(slug) {
@@ -235,7 +284,7 @@ function updateShowAllButtonAppearance() {
   showAllBtn.setAttribute('aria-pressed', String(isActive));
   const icon = showAllBtn.querySelector('.show-all-btn__icon');
   if (icon) {
-    icon.textContent = isActive ? 'ВСЕ' : 'ВЫКЛ';
+    icon.textContent = isActive ? 'ВКЛ' : 'ВЫКЛ';
   }
 }
 
@@ -270,14 +319,11 @@ function fetchPins() {
   return fetch('/api/pins')
     .then((response) => response.json())
     .then((pins) => {
-      clearMarkers();
-      pins.forEach((pin) => {
-        const slug = pin.category_slug || pin.category;
-        pin.color = colorForCategorySlug(slug);
-        addPinToMap(pin);
-      });
+      const popupState = captureOpenPinPopupState();
+      reconcilePins(pins);
       applyCategoryFilters();
       updateCounters();
+      restoreOpenPinPopupState(popupState);
     })
     .catch((error) => {
       console.error('Failed to load pins', error);
@@ -285,16 +331,24 @@ function fetchPins() {
 }
 
 function refreshMarkers() {
+  if (refreshInFlightPromise) {
+    return refreshInFlightPromise;
+  }
+
   if (refreshBtn) {
     refreshBtn.disabled = true;
     refreshBtn.classList.add('refresh-btn--loading');
   }
-  return fetchPins().finally(() => {
+
+  refreshInFlightPromise = fetchPins().finally(() => {
     if (refreshBtn) {
       refreshBtn.disabled = false;
       refreshBtn.classList.remove('refresh-btn--loading');
     }
+    refreshInFlightPromise = null;
   });
+
+  return refreshInFlightPromise;
 }
 
 function startAutoRefresh() {
@@ -311,6 +365,151 @@ function clearMarkers() {
   activeMarkers.length = 0;
 }
 
+function getActiveMarkerEntry(pinId) {
+  const normalizedPinId = Number(pinId);
+  if (!normalizedPinId) {
+    return null;
+  }
+  return activeMarkers.find(({ marker }) => Number(marker.pinId) === normalizedPinId) || null;
+}
+
+function updateMarkerFromPin(entry, pin) {
+  const { marker } = entry;
+  entry.pin = pin;
+  marker.pinCategorySlug = pin.category_slug;
+  marker.pinColor = pin.color;
+  marker.pinData = pin;
+
+  const { strokeOpacity, fillOpacity } = computeOpacityFromTTL(pin.ttl_seconds);
+  marker.setStyle({
+    color: pin.color,
+    fillColor: pin.color,
+    fillOpacity,
+    opacity: strokeOpacity,
+  });
+
+  marker.setLatLng([pin.lat, pin.lng]);
+
+  const tooltipText = pin.title || pin.nickname || 'Метка';
+  if (typeof marker.setTooltipContent === 'function') {
+    marker.setTooltipContent(tooltipText);
+  }
+
+  const isPopupOpen = typeof marker.isPopupOpen === 'function' ? marker.isPopupOpen() : false;
+  if (!isPopupOpen) {
+    marker.setPopupContent(createPopupContent(pin));
+  }
+}
+
+function reconcilePins(nextPins) {
+  const incomingPins = Array.isArray(nextPins) ? nextPins : [];
+  const incomingById = new Map();
+
+  incomingPins.forEach((rawPin) => {
+    const slug = rawPin.category_slug || rawPin.category;
+    const pin = {
+      ...rawPin,
+      category_slug: slug,
+      color: colorForCategorySlug(slug),
+    };
+    incomingById.set(Number(pin.id), pin);
+  });
+
+  for (let index = activeMarkers.length - 1; index >= 0; index -= 1) {
+    const entry = activeMarkers[index];
+    if (!incomingById.has(Number(entry.marker.pinId))) {
+      entry.marker.remove();
+      activeMarkers.splice(index, 1);
+    }
+  }
+
+  incomingPins.forEach((rawPin) => {
+    const normalizedPin = incomingById.get(Number(rawPin.id));
+    if (!normalizedPin) {
+      return;
+    }
+    const existingEntry = getActiveMarkerEntry(normalizedPin.id);
+    if (!existingEntry) {
+      addPinToMap(normalizedPin);
+      return;
+    }
+    updateMarkerFromPin(existingEntry, normalizedPin);
+  });
+}
+
+function captureOpenPinPopupState() {
+  const openedEntry = activeMarkers.find(({ marker }) => typeof marker.isPopupOpen === 'function' && marker.isPopupOpen());
+  if (!openedEntry) {
+    return null;
+  }
+
+  const pinId = Number(openedEntry.marker.pinId);
+  if (!pinId) {
+    return null;
+  }
+
+  const popupEl = document.querySelector(`.pin-popup[data-pin-id="${pinId}"]`);
+  const inputEl = popupEl ? popupEl.querySelector('.pin-comments__form input[name="comment"]') : null;
+  const listEl = popupEl ? popupEl.querySelector('.pin-comments__list') : null;
+
+  return {
+    pinId,
+    inputValue: inputEl ? inputEl.value : '',
+    selectionStart: inputEl && typeof inputEl.selectionStart === 'number' ? inputEl.selectionStart : null,
+    selectionEnd: inputEl && typeof inputEl.selectionEnd === 'number' ? inputEl.selectionEnd : null,
+    wasFocused: Boolean(inputEl && document.activeElement === inputEl),
+    commentsScrollTop: listEl ? listEl.scrollTop : null,
+  };
+}
+
+function restoreOpenPinPopupState(state) {
+  if (!state || !state.pinId) {
+    return;
+  }
+
+  const entry = getActiveMarkerEntry(state.pinId);
+  if (!entry) {
+    return;
+  }
+
+  const marker = entry.marker;
+  if (typeof marker.isPopupOpen === 'function' && !marker.isPopupOpen()) {
+    marker.openPopup();
+  }
+
+  requestAnimationFrame(() => {
+    const popupEl = document.querySelector(`.pin-popup[data-pin-id="${state.pinId}"]`);
+    if (!popupEl) {
+      return;
+    }
+
+    const inputEl = popupEl.querySelector('.pin-comments__form input[name="comment"]');
+    if (inputEl) {
+      inputEl.value = state.inputValue || '';
+      if (typeof state.selectionStart === 'number' && typeof state.selectionEnd === 'number') {
+        try {
+          inputEl.setSelectionRange(state.selectionStart, state.selectionEnd);
+        } catch (_error) {
+          // Ignore unsupported input state restoration.
+        }
+      }
+      if (state.wasFocused) {
+        try {
+          inputEl.focus({ preventScroll: true });
+        } catch (_error) {
+          inputEl.focus();
+        }
+      }
+    }
+
+    const listEl = popupEl.querySelector('.pin-comments__list');
+    if (listEl && typeof state.commentsScrollTop === 'number') {
+      listEl.scrollTop = state.commentsScrollTop;
+      updateScrollHintState(listEl);
+    }
+  });
+}
+
 function createPopupContent(pin) {
   const category = getCategoryBySlug(pin.category_slug);
   const currentNickname = currentAuthUser?.nickname || null;
@@ -319,8 +518,11 @@ function createPopupContent(pin) {
     ? `<button class="delete-pin delete-pin-btn" data-pin-id="${pin.id}">Удалить</button>`
     : '';
   const shareUrl = new URL(`/pin/${pin.shared_token}`, window.location.origin).href;
+  const commentsList = renderCommentsList(pin.comments || [], currentNickname, pin.id);
+  const commentForm = renderCommentForm(currentNickname, pin.id);
+
   return `
-    <div class="pin-popup">
+    <div class="pin-popup" data-pin-id="${pin.id}">
       <strong>${pin.nickname}</strong>
       <p class="pin-popup__category">${category?.icon ?? ''} ${category?.label ?? 'Категория'}</p>
       <p>${pin.description}</p>
@@ -333,8 +535,312 @@ function createPopupContent(pin) {
         <button type="button" class="popup-share${isAuthor ? '' : ' popup-share--single'}" data-share-url="${shareUrl}">Поделиться</button>
         ${deleteButton}
       </div>
+      <div class="pin-comments" data-pin-id="${pin.id}">
+        <div class="pin-comments__header">
+          <span>Комментарии</span>
+        </div>
+        ${commentsList}
+        ${commentForm}
+      </div>
     </div>
   `;
+}
+
+function renderCommentsList(comments, currentNickname, pinId) {
+  const hasComments = Array.isArray(comments) && comments.length > 0;
+  if (!hasComments) {
+    return '<div class="pin-comments__empty">Комментариев пока нет</div>';
+  }
+  const items = comments
+    .map((comment) => {
+      const canDelete = currentNickname && currentNickname === comment.user_id;
+      return `
+        <div class="pin-comment" data-comment-id="${comment.id}">
+          <div class="pin-comment__text">
+            <span class="pin-comment__author">${comment.user_id || 'Аноним'}:</span>
+            <span class="pin-comment__body">${escapeHtml(comment.text)}</span>
+          </div>
+          <div class="pin-comment__meta">
+            <span class="pin-comment__time">${formatTimestamp(comment.timestamp)}</span>
+            ${canDelete ? `<button class="pin-comment__delete" data-pin-id="${pinId}" data-comment-id="${comment.id}" title="Удалить комментарий">✖</button>` : ''}
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+  return `<div class="pin-comments__list" data-pin-id="${pinId}">${items}</div>`;
+}
+
+function getCommentsListElement(pinId) {
+  const popup = document.querySelector(`.pin-popup[data-pin-id="${pinId}"]`);
+  if (!popup) {
+    return null;
+  }
+  return popup.querySelector('.pin-comments__list');
+}
+
+function getOrCreateCommentsList(pinId, snapshot) {
+  const popup = document.querySelector(`.pin-popup[data-pin-id="${pinId}"]`);
+  if (!popup) {
+    return null;
+  }
+  let listEl = popup.querySelector('.pin-comments__list');
+  if (listEl) {
+    return listEl;
+  }
+  const currentNickname = currentAuthUser?.nickname || null;
+  const markup = renderCommentsList(snapshot, currentNickname, pinId);
+  const placeholder = popup.querySelector('.pin-comments__empty');
+  if (placeholder) {
+    placeholder.outerHTML = markup;
+  } else {
+    const wrapper = popup.querySelector('.pin-comments');
+    if (wrapper) {
+      wrapper.insertAdjacentHTML('beforeend', markup);
+    }
+  }
+  return popup.querySelector('.pin-comments__list');
+}
+
+function ensureCommentScrollMeta(pinId) {
+  if (!commentScrollState.has(pinId)) {
+    commentScrollState.set(pinId, { locked: false });
+  }
+  return commentScrollState.get(pinId);
+}
+
+function updateScrollHintState(listEl) {
+  if (!listEl) {
+    return;
+  }
+  const hasOffset = listEl.scrollTop > 10;
+  listEl.classList.toggle('pin-comments__list--scrollable', hasOffset);
+}
+
+function bindCommentListScroll(pinId, listEl) {
+  if (!listEl || listEl.dataset.scrollBound === 'true') {
+    return;
+  }
+  listEl.dataset.scrollBound = 'true';
+  listEl.addEventListener(
+    'scroll',
+    () => {
+      const meta = ensureCommentScrollMeta(pinId);
+      const distanceFromBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight;
+      meta.locked = distanceFromBottom > 40;
+      updateScrollHintState(listEl);
+    },
+    { passive: true }
+  );
+}
+
+function scrollCommentsToBottom(pinId, options = {}) {
+  const { force = false, smooth = true } = options;
+  const listEl = getCommentsListElement(pinId);
+  if (!listEl) {
+    return;
+  }
+  const meta = ensureCommentScrollMeta(pinId);
+  if (!force && meta.locked) {
+    return;
+  }
+  listEl.scrollTo({
+    top: listEl.scrollHeight,
+    behavior: smooth ? 'smooth' : 'auto',
+  });
+  meta.locked = false;
+  requestAnimationFrame(() => updateScrollHintState(listEl));
+}
+
+function buildCommentElement(comment, pinId, canDelete) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'pin-comment';
+  wrapper.dataset.commentId = comment.id;
+
+  const textBlock = document.createElement('div');
+  textBlock.className = 'pin-comment__text';
+  const authorEl = document.createElement('span');
+  authorEl.className = 'pin-comment__author';
+  authorEl.textContent = `${comment.user_id || 'Аноним'}:`;
+  const bodyEl = document.createElement('span');
+  bodyEl.className = 'pin-comment__body';
+  bodyEl.textContent = comment.text || '';
+  textBlock.append(authorEl, bodyEl);
+
+  const metaEl = document.createElement('div');
+  metaEl.className = 'pin-comment__meta';
+  const timeEl = document.createElement('span');
+  timeEl.className = 'pin-comment__time';
+  timeEl.textContent = formatTimestamp(comment.timestamp);
+  metaEl.appendChild(timeEl);
+  if (canDelete) {
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'pin-comment__delete';
+    deleteBtn.dataset.pinId = String(pinId);
+    deleteBtn.dataset.commentId = comment.id;
+    deleteBtn.title = 'Удалить комментарий';
+    deleteBtn.textContent = '✖';
+    metaEl.appendChild(deleteBtn);
+  }
+
+  wrapper.append(textBlock, metaEl);
+  return wrapper;
+}
+
+function applyCommentsUpdate(pinId, comments, options = {}) {
+  const { animateNew = false, forceScroll = false } = options;
+  const normalized = Array.isArray(comments) ? comments.slice() : [];
+  const listEl = getOrCreateCommentsList(pinId, normalized);
+  if (!listEl) {
+    return;
+  }
+
+  const currentNickname = currentAuthUser?.nickname || null;
+  const previous = commentStateCache.get(pinId) || [];
+  const previousIds = new Set(previous.map((comment) => comment.id));
+  const meta = ensureCommentScrollMeta(pinId);
+
+  listEl.innerHTML = '';
+  if (!normalized.length) {
+    listEl.innerHTML = '<div class="pin-comments__empty">Комментариев пока нет</div>';
+    commentStateCache.set(pinId, []);
+    updateScrollHintState(listEl);
+    return;
+  }
+
+  let hasNewEntries = false;
+  normalized.forEach((comment) => {
+    const canDelete = currentNickname && currentNickname === comment.user_id;
+    const commentEl = buildCommentElement(comment, pinId, canDelete);
+    const isNewEntry = !previousIds.has(comment.id);
+    if (animateNew && isNewEntry) {
+      commentEl.classList.add('pin-comment--incoming');
+    }
+    if (isNewEntry) {
+      hasNewEntries = true;
+    }
+    listEl.appendChild(commentEl);
+  });
+
+  commentStateCache.set(pinId, normalized);
+  bindCommentListScroll(pinId, listEl);
+  updateScrollHintState(listEl);
+  if (forceScroll) {
+    scrollCommentsToBottom(pinId, { force: true, smooth: true });
+  } else if (hasNewEntries && !meta.locked) {
+    scrollCommentsToBottom(pinId, { force: true, smooth: animateNew });
+  }
+}
+
+function initializeCommentsView(pinId, comments) {
+  commentStateCache.set(pinId, Array.isArray(comments) ? comments.slice() : []);
+  const listEl = getCommentsListElement(pinId);
+  if (listEl) {
+    bindCommentListScroll(pinId, listEl);
+    requestAnimationFrame(() => {
+      scrollCommentsToBottom(pinId, { force: true, smooth: false });
+      updateScrollHintState(listEl);
+    });
+  }
+}
+
+function shouldUpdateComments(pinId, nextComments) {
+  const cached = commentStateCache.get(pinId) || [];
+  if (cached.length !== nextComments.length) {
+    return true;
+  }
+  for (let i = 0; i < cached.length; i += 1) {
+    if (cached[i]?.id !== nextComments[i]?.id) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isPopupStillOpen(pinId) {
+  const popup = document.querySelector(`.pin-popup[data-pin-id="${pinId}"]`);
+  return Boolean(popup && popup.offsetParent !== null);
+}
+
+function pollComments(pinId) {
+  if (!pinId) {
+    return Promise.resolve();
+  }
+  return fetch(`/get_comments?marker_id=${pinId}`, { credentials: 'same-origin' })
+    .then(handleJsonResponse)
+    .then((payload) => {
+      const comments = payload?.comments || [];
+      if (!isPopupStillOpen(pinId)) {
+        stopCommentPolling(pinId);
+        return;
+      }
+      if (!shouldUpdateComments(pinId, comments)) {
+        return;
+      }
+      applyCommentsUpdate(pinId, comments, { animateNew: true });
+    })
+    .catch((error) => {
+      console.error('Не удалось получить комментарии', error);
+    });
+}
+
+function startCommentPolling(pinId) {
+  if (!pinId) {
+    return;
+  }
+  stopCommentPolling(pinId);
+  pollComments(pinId);
+  const timerId = setInterval(() => {
+    pollComments(pinId);
+  }, COMMENT_POLL_INTERVAL);
+  commentPollers.set(pinId, timerId);
+}
+
+function stopCommentPolling(pinId) {
+  const timerId = commentPollers.get(pinId);
+  if (timerId) {
+    clearInterval(timerId);
+    commentPollers.delete(pinId);
+  }
+}
+
+function renderCommentForm(currentNickname, pinId) {
+  if (!currentNickname) {
+    return '<div class="pin-comments__hint">Войдите, чтобы написать комментарий.</div>';
+  }
+  return `
+    <form class="pin-comments__form" data-pin-id="${pinId}">
+      <input type="text" name="comment" maxlength="${COMMENT_MAX_LENGTH}" placeholder="Написать..." autocomplete="off" />
+      <button type="submit">Отправить</button>
+    </form>
+  `;
+}
+
+function escapeHtml(text = '') {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatTimestamp(timestamp) {
+  if (!timestamp) {
+    return '';
+  }
+  try {
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) {
+      return '';
+    }
+    return date.toLocaleString('ru-RU', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+  } catch (_error) {
+    return '';
+  }
 }
 
 function applyPopupFadeEffect(popup) {
@@ -563,6 +1069,7 @@ function isAuthenticated() {
   return Boolean(currentAuthUser && currentAuthUser.nickname);
 }
 
+
 function updateAuthModeUI() {
   const { authTitle, authSubmitBtn, switchPrefix, switchLink } = getAuthElements();
   if (!authTitle || !authSubmitBtn || !switchPrefix || !switchLink) {
@@ -573,12 +1080,54 @@ function updateAuthModeUI() {
   authSubmitBtn.textContent = isLogin ? 'Войти' : 'Регистрация';
   switchPrefix.textContent = isLogin ? 'Или' : 'Уже есть аккаунт?';
   switchLink.textContent = isLogin ? 'создайте аккаунт' : 'Войти';
+  syncAuthModeFields();
+  syncPasswordAutocomplete();
 }
 
 function toggleAuthMode() {
   currentAuthMode = currentAuthMode === AUTH_MODES.LOGIN ? AUTH_MODES.REGISTER : AUTH_MODES.LOGIN;
   updateAuthModeUI();
   clearAuthMessage();
+}
+
+function syncAuthModeFields() {
+  const isRegisterMode = currentAuthMode === AUTH_MODES.REGISTER;
+  document.querySelectorAll('[data-auth-mode="register"]').forEach((field) => {
+    const input = field.querySelector('input');
+    field.hidden = !isRegisterMode;
+    field.classList.toggle('auth-field--hidden', !isRegisterMode);
+    field.setAttribute('aria-hidden', String(!isRegisterMode));
+    if (input) {
+      if (isRegisterMode) {
+        input.disabled = false;
+        input.required = true;
+        input.removeAttribute('disabled');
+        input.setAttribute('aria-disabled', 'false');
+      } else {
+        input.disabled = true;
+        input.required = false;
+        input.setAttribute('aria-disabled', 'true');
+        input.value = '';
+      }
+    }
+  });
+}
+
+function syncPasswordAutocomplete() {
+  const { authForm } = getAuthElements();
+  if (!authForm || !authForm.elements) {
+    return;
+  }
+  const passwordInput = authForm.elements.password;
+  const confirmInput = authForm.elements.password_confirm;
+  if (passwordInput) {
+    const isLogin = currentAuthMode === AUTH_MODES.LOGIN;
+    const autocompleteValue = isLogin ? 'current-password' : 'new-password';
+    passwordInput.setAttribute('autocomplete', autocompleteValue);
+  }
+  if (confirmInput) {
+    confirmInput.setAttribute('autocomplete', 'off');
+  }
 }
 
 function renderAuthState(message = '') {
@@ -623,7 +1172,9 @@ function renderAuthState(message = '') {
 function readAuthPayload(form) {
   const nickname = form?.elements?.nickname?.value?.trim() || '';
   const password = form?.elements?.password?.value || '';
-  return { nickname, password };
+  const confirmElement = form?.elements?.password_confirm;
+  const passwordConfirm = confirmElement && !confirmElement.disabled ? confirmElement.value : '';
+  return { nickname, password, passwordConfirm };
 }
 
 function handleAuthResponse(response) {
@@ -705,11 +1256,25 @@ function initAuthWidget() {
   if (authForm) {
     authForm.addEventListener('submit', (event) => {
       event.preventDefault();
-      const payload = readAuthPayload(authForm);
+      const { nickname, password, passwordConfirm } = readAuthPayload(authForm);
+      const shouldValidateConfirm = currentAuthMode === AUTH_MODES.REGISTER;
+      const confirmFieldActive = Boolean(authForm.elements.password_confirm && !authForm.elements.password_confirm.disabled);
+      if (shouldValidateConfirm && confirmFieldActive && password !== passwordConfirm) {
+        setAuthMessage('Пароли не совпадают');
+        if (authSubmitBtn) {
+          authSubmitBtn.disabled = false;
+        }
+        return;
+      }
+      clearAuthMessage();
+      const payload = { nickname, password };
       const endpoint = currentAuthMode === AUTH_MODES.LOGIN ? '/login' : '/register';
       const successMessage = currentAuthMode === AUTH_MODES.LOGIN
         ? 'Вход выполнен.'
         : 'Регистрация завершена, вход выполнен.';
+      if (authSubmitBtn) {
+        authSubmitBtn.disabled = true;
+      }
       submitAuth(endpoint, payload)
         .then((result) => {
           currentAuthUser = result.user;
@@ -725,9 +1290,6 @@ function initAuthWidget() {
             authSubmitBtn.disabled = false;
           }
         });
-      if (authSubmitBtn) {
-        authSubmitBtn.disabled = true;
-      }
     });
   }
 
@@ -878,6 +1440,7 @@ function addPinToMap(pin) {
   marker.pinId = pin.id;
   marker.pinCategorySlug = pin.category_slug;
   marker.pinColor = pin.color;
+  marker.pinData = pin;
   const tooltipText = pin.title || pin.nickname || 'Метка';
   marker.bindTooltip(tooltipText, { sticky: true });
   if (isTouchDevice) {
@@ -897,6 +1460,17 @@ function addPinToMap(pin) {
     });
   }
   marker.bindPopup(createPopupContent(pin));
+  marker.on('popupopen', () => {
+    attachCommentHandlers(marker.pinId);
+    initializeCommentsView(marker.pinId, marker.pinData?.comments || []);
+    startCommentPolling(marker.pinId);
+    minimizeFilterPanelForPinPopup();
+    centerPinPopupOnMobile(marker.pinId);
+  });
+  marker.on('popupclose', () => {
+    stopCommentPolling(marker.pinId);
+    restoreFilterPanelAfterPinPopup();
+  });
   marker.on('popupopen', (event) => applyPopupFadeEffect(event.popup));
   if (activeCategorySlugs.has(pin.category_slug)) {
     marker.addTo(map);
@@ -1228,7 +1802,134 @@ document.addEventListener('click', function (e) {
     }
     return;
   }
+
+  const deleteCommentBtn = e.target.closest('.pin-comment__delete');
+  if (deleteCommentBtn) {
+    e.preventDefault();
+    const pinId = Number(deleteCommentBtn.dataset.pinId);
+    const commentId = deleteCommentBtn.dataset.commentId;
+    if (pinId && commentId) {
+      handleDeleteComment(pinId, commentId);
+    }
+  }
 });
+
+document.addEventListener('submit', (event) => {
+  const form = event.target.closest('.pin-comments__form');
+  if (!form) {
+    return;
+  }
+  event.preventDefault();
+  const pinId = Number(form.dataset.pinId);
+  const input = form.querySelector('input[name="comment"]');
+  if (!pinId || !input) {
+    return;
+  }
+  const text = input.value.trim();
+  if (!text) {
+    return;
+  }
+  if (text.length > COMMENT_MAX_LENGTH) {
+    showUserToast(`Комментарий не должен превышать ${COMMENT_MAX_LENGTH} символов.`);
+    return;
+  }
+  submitComment(pinId, text, form, input);
+});
+
+function attachCommentHandlers(pinId) {
+  const popup = document.querySelector(`.pin-popup[data-pin-id="${pinId}"]`);
+  if (!popup) {
+    return;
+  }
+  const form = popup.querySelector('.pin-comments__form');
+  if (form) {
+    const input = form.querySelector('input[name="comment"]');
+    if (input && isTouchDevice) {
+      input.addEventListener('focus', () => {
+        popup.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
+  }
+}
+
+function submitComment(pinId, text, form, input) {
+  if (!isAuthenticated()) {
+    showUserToast('Войдите, чтобы оставлять комментарии.');
+    return;
+  }
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton) {
+    submitButton.disabled = true;
+  }
+  fetch('/add_comment', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'same-origin',
+    body: JSON.stringify({ marker_id: pinId, text }),
+  })
+    .then(handleJsonResponse)
+    .then((data) => {
+      if (!data.comments) {
+        return;
+      }
+      applyCommentsUpdate(pinId, data.comments, { forceScroll: true, animateNew: true });
+      if (input) {
+        input.value = '';
+      }
+    })
+    .catch((error) => {
+      showUserToast(error.message || 'Не удалось отправить комментарий.');
+    })
+    .finally(() => {
+      if (submitButton) {
+        submitButton.disabled = false;
+      }
+    });
+}
+
+function handleDeleteComment(pinId, commentId) {
+  if (!isAuthenticated()) {
+    showUserToast('Нужно войти в аккаунт, чтобы удалять комментарии.');
+    return;
+  }
+  fetch('/delete_comment', {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'same-origin',
+    body: JSON.stringify({ marker_id: pinId, comment_id: commentId }),
+  })
+    .then(handleJsonResponse)
+    .then((data) => {
+      if (!data.comments) {
+        return;
+      }
+      applyCommentsUpdate(pinId, data.comments, { animateNew: false });
+    })
+    .catch((error) => {
+      showUserToast(error.message || 'Не удалось удалить комментарий.');
+    });
+}
+
+function handleJsonResponse(response) {
+  if (response.ok) {
+    return response.json();
+  }
+  return response
+    .json()
+    .catch(() => ({}))
+    .then((payload) => {
+      const message = payload?.description || payload?.message || `Ошибка (HTTP ${response.status})`;
+      throw new Error(message);
+    });
+}
+
+function updateCommentsUI(pinId, comments) {
+  applyCommentsUpdate(pinId, comments, { forceScroll: true, animateNew: true });
+}
 function expandFilterPanel() {
   const panel = getFilterPanelElement();
   if (!panel) {

@@ -1,0 +1,35 @@
+{
+  "markers": [
+    {
+      "id": 1,
+      "category": "community",
+      "category_slug": "community",
+      "subcategory_slug": "community.chat",
+      "nickname": "Антон",
+      "description": "Встреча у фонтана",
+      "contact": "@antich",
+      "lat": 55.7558,
+      "lng": 37.6176,
+      "comments": [
+        {
+          "id": "example-1",
+          "user_id": "antich",
+          "text": "Буду через 10 минут",
+          "timestamp": "2026-03-27T17:00:00Z"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "category": "sport",
+      "category_slug": "sport",
+      "subcategory_slug": "sport.cycling",
+      "nickname": "Велозаезд",
+      "description": "Сбор у ВДНХ",
+      "contact": null,
+      "lat": 55.83,
+      "lng": 37.64,
+      "comments": []
+    }
+  ]
+}

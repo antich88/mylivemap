@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, session, url_for
 
@@ -9,10 +10,13 @@ from config import CATEGORY_DEFINITIONS, MAP_DEFAULTS, SECRET_KEY, SHARING_META
 from database import ensure_connection, init_schema
 from models import (
     active_pins,
+    add_comment,
     adjust_rating,
     count_active_pins_for_user,
     create_pin,
+    delete_comment,
     delete_pin,
+    get_pin_by_id,
     get_pin_owner,
 )
 
@@ -88,7 +92,7 @@ def create_app() -> Flask:
             app.logger.exception("Register failed for nickname=%s: %s", nickname, exc)
             return {"message": "Не удалось завершить регистрацию. Попробуйте позже."}, 500
         if not user:
-            return {"message": "Пользователь с таким nickname уже существует."}, 409
+            return {"message": "Пользователь с таким именем уже существует."}, 409
 
         session["user_nickname"] = user.nickname
         return {"user": {"nickname": user.nickname}}, 201
@@ -105,7 +109,7 @@ def create_app() -> Flask:
             app.logger.exception("Login failed for nickname=%s: %s", nickname, exc)
             return {"message": "Не удалось выполнить вход. Попробуйте позже."}, 500
         if not user:
-            return {"message": "Неверный nickname или password."}, 401
+            return {"message": "Неверные имя пользователя или пароль."}, 401
 
         session["user_nickname"] = user.nickname
         return {"user": {"nickname": user.nickname}}, 200
@@ -164,6 +168,60 @@ def create_app() -> Flask:
         if not pin:
             abort(500)
         return jsonify(pin.to_dict())
+
+    def _require_authenticated_user():
+        user = current_user_payload()
+        if not user:
+            abort(401, description="Нужно войти в аккаунт.")
+        return user
+
+    def _pin_or_404(pin_id: int):
+        pin = next((p for p in active_pins() if p.id == pin_id), None)
+        if not pin:
+            abort(404)
+        return pin
+
+    @app.route("/add_comment", methods=["POST"])
+    def add_comment_route():
+        user = _require_authenticated_user()
+        payload = request.get_json(force=True, silent=True) or {}
+        marker_id = payload.get("marker_id")
+        text = payload.get("text", "")
+        if not isinstance(marker_id, int):
+            abort(400, description="Некорректный идентификатор метки.")
+        if not text or not str(text).strip():
+            abort(400, description="Комментарий не может быть пустым.")
+        comments = add_comment(marker_id, user["nickname"], text)
+        if comments is None:
+            abort(404, description="Метка не найдена или устарела.")
+        return jsonify({"comments": comments})
+
+    @app.route("/delete_comment", methods=["DELETE"])
+    def delete_comment_route():
+        user = _require_authenticated_user()
+        payload = request.get_json(force=True, silent=True) or {}
+        marker_id = payload.get("marker_id")
+        comment_id = payload.get("comment_id")
+        if not isinstance(marker_id, int) or not comment_id:
+            abort(400, description="Неверные параметры удаления.")
+        status, comments = delete_comment(marker_id, user["nickname"], str(comment_id))
+        if status == "pin_not_found":
+            abort(404, description="Метка не найдена или устарела.")
+        if status == "not_found":
+            abort(404, description="Комментарий не найден.")
+        if status == "forbidden":
+            abort(403, description="Можно удалить только свой комментарий.")
+        return jsonify({"comments": comments or []})
+
+    @app.route("/get_comments", methods=["GET"])
+    def get_comments_route():
+        marker_id = request.args.get("marker_id", type=int)
+        if marker_id is None:
+            abort(400, description="Некорректный идентификатор метки.")
+        pin = get_pin_by_id(marker_id)
+        if not pin:
+            abort(404, description="Метка не найдена или устарела.")
+        return jsonify({"comments": pin.comments})
 
     @app.route("/api/pins/<int:pin_id>", methods=["DELETE"])
     def remove_pin(pin_id: int) -> tuple[dict, int]:
@@ -235,4 +293,5 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)

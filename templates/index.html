@@ -62,9 +62,9 @@
                 id="show-all-btn"
                 class="panel-round-btn show-all-btn"
                 type="button"
-                aria-label="Показать все категории"
+                aria-label="Переключить режим «ВКЛ» для всех категорий"
               >
-                <span class="show-all-btn__icon" aria-hidden="true">ВСЕ</span>
+                <span class="show-all-btn__icon" aria-hidden="true">ВКЛ</span>
               </button>
               <button
                 id="refresh-btn"
@@ -84,14 +84,18 @@
               <h3 class="auth-panel__title" id="auth-panel-title">Войдите в аккаунт</h3>
 
               <form id="auth-form" class="auth-panel__form" autocomplete="on">
-                <label class="auth-field">
-                  <span class="auth-field__icon" aria-hidden="true">👤</span>
-                  <input name="nickname" type="text" minlength="3" required placeholder="Имя пользователя" />
-                </label>
-                <label class="auth-field">
-                  <span class="auth-field__icon" aria-hidden="true">🔒</span>
-                  <input name="password" type="password" minlength="6" required placeholder="Пароль" />
-                </label>
+                 <label class="auth-field">
+                   <span class="auth-field__icon" aria-hidden="true">👤</span>
+                   <input name="nickname" type="text" minlength="3" required placeholder="Имя пользователя" autocomplete="username" />
+                 </label>
+                  <label class="auth-field">
+                    <span class="auth-field__icon" aria-hidden="true">🔒</span>
+                    <input name="password" type="password" minlength="6" required placeholder="Пароль" autocomplete="new-password" />
+                  </label>
+                  <label class="auth-field auth-field--register-only" data-auth-mode="register" hidden>
+                    <span class="auth-field__icon" aria-hidden="true">🔒</span>
+                    <input name="password_confirm" type="password" minlength="6" placeholder="Повторите пароль" autocomplete="off" />
+                  </label>
                 <button id="auth-submit-btn" type="submit" class="auth-panel__submit">Войти</button>
               </form>
 
