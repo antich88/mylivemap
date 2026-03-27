@@ -4,13 +4,14 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timezone, timedelta
 import json
 import secrets
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
-from sqlalchemy import delete, func, insert, select, update
-from sqlalchemy.engine import RowMapping
+from config import CATEGORY_DEFINITIONS, LOCAL_PINS_PATH, is_local_mode, ttl_for
+from database import LocalPinStore, pins_table, session_scope
 
-from config import CATEGORY_DEFINITIONS, ttl_for
-from database import pins_table, session_scope
+
+LOCAL_MODE = is_local_mode()
+_LOCAL_STORE = LocalPinStore(LOCAL_PINS_PATH) if LOCAL_MODE else None
 
 
 def _coerce_dt(value):
@@ -62,25 +63,50 @@ class Pin:
         payload["category"] = self.category
         payload["user_id"] = self.user_id
         return payload
-def _mapping_to_pin(row: RowMapping) -> Pin:
-    metadata_payload = json.loads(row["metadata"]) if row["metadata"] else None
+def _mapping_to_pin(row: Mapping[str, Any]) -> Pin:
+    raw_metadata = row.get("metadata")
+    if isinstance(raw_metadata, str):
+        metadata_payload = json.loads(raw_metadata) if raw_metadata else None
+    elif isinstance(raw_metadata, dict):
+        metadata_payload = raw_metadata
+    else:
+        metadata_payload = None
+
+    created_at = _coerce_dt(row.get("created_at")) or datetime.now(timezone.utc)
+
     return Pin(
-        id=row["id"],
-        category=row["category"],
-        category_slug=row["category_slug"],
-        subcategory_slug=row["subcategory_slug"],
-        nickname=row["nickname"],
-        description=row["description"],
-        contact=row["contact"],
-        lat=row["lat"],
-        lng=row["lng"],
-        created_at=_coerce_dt(row["created_at"]),
-        expires_at=_coerce_dt(row["expires_at"]),
-        rating=row["rating"],
+        id=int(row.get("id", 0)),
+        category=str(row.get("category") or ""),
+        category_slug=str(row.get("category_slug") or ""),
+        subcategory_slug=str(row.get("subcategory_slug") or ""),
+        nickname=str(row.get("nickname") or ""),
+        description=str(row.get("description") or ""),
+        contact=row.get("contact"),
+        lat=float(row.get("lat", 0.0)),
+        lng=float(row.get("lng", 0.0)),
+        created_at=created_at,
+        expires_at=_coerce_dt(row.get("expires_at")),
+        rating=int(row.get("rating", 0)),
         metadata=metadata_payload,
-        shared_token=row["shared_token"],
-        user_id=row["user_id"] or "",
+        shared_token=row.get("shared_token"),
+        user_id=str(row.get("user_id") or ""),
     )
+
+
+def _pin_is_active(record: Mapping[str, Any], now: datetime) -> bool:
+    expires_at = _coerce_dt(record.get("expires_at"))
+    return expires_at is None or expires_at > now
+
+
+def _serialize_local_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(record)
+    created_at = payload.get("created_at")
+    expires_at = payload.get("expires_at")
+    if isinstance(created_at, datetime):
+        payload["created_at"] = created_at.isoformat()
+    if isinstance(expires_at, datetime):
+        payload["expires_at"] = expires_at.isoformat()
+    return payload
 
 
 def create_pin(
@@ -101,7 +127,39 @@ def create_pin(
     token = secrets.token_urlsafe(12)
     payload = metadata or {}
 
-    print(f"create_pin: {category=} {category_slug=} {subcategory_slug=} {nickname=} {lat=} {lng=}" )
+    print(f"create_pin: {category=} {category_slug=} {subcategory_slug=} {nickname=} {lat=} {lng=}")
+
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        pins = list(snapshot.get("pins", []))
+        last_id = int(snapshot.get("last_id", 0)) + 1
+
+        record = {
+            "id": last_id,
+            "category": category,
+            "category_slug": category_slug,
+            "subcategory_slug": subcategory_slug,
+            "nickname": nickname,
+            "description": description,
+            "contact": contact,
+            "lat": lat,
+            "lng": lng,
+            "created_at": now,
+            "expires_at": expires_at,
+            "rating": 0,
+            "metadata": payload,
+            "shared_token": token,
+            "user_id": user_id,
+        }
+
+        pins.append(_serialize_local_record(record))
+        snapshot["pins"] = pins
+        snapshot["last_id"] = last_id
+        _LOCAL_STORE.persist(snapshot)
+        return _mapping_to_pin(record)
+
+    from sqlalchemy import insert
+
     with session_scope() as session:
         stmt = (
             insert(pins_table)
@@ -129,6 +187,16 @@ def create_pin(
 
 def get_pin_by_id(pin_id: int) -> Optional[Pin]:
     now_iso = datetime.now(timezone.utc)
+
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        for record in snapshot.get("pins", []):
+            if int(record.get("id", 0)) == pin_id and _pin_is_active(record, now_iso):
+                return _mapping_to_pin(record)
+        return None
+
+    from sqlalchemy import select
+
     with session_scope() as session:
         stmt = select(pins_table).where(
             pins_table.c.id == pin_id,
@@ -145,6 +213,22 @@ def active_pins(
     rating_threshold: int = -999,
 ) -> List[Pin]:
     now_iso = datetime.now(timezone.utc)
+
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        filtered: List[Pin] = []
+        for record in snapshot.get("pins", []):
+            if not _pin_is_active(record, now_iso):
+                continue
+            if int(record.get("rating", 0)) < rating_threshold:
+                continue
+            if allowed_subcategories and record.get("subcategory_slug") not in allowed_subcategories:
+                continue
+            filtered.append(_mapping_to_pin(record))
+        return filtered
+
+    from sqlalchemy import select
+
     stmt = select(pins_table).where(
         (pins_table.c.expires_at.is_(None) | (pins_table.c.expires_at > now_iso)),
         pins_table.c.rating >= rating_threshold,
@@ -160,6 +244,19 @@ def count_active_pins_for_user(user_id: str) -> int:
     if not user_id:
         return 0
     now_iso = datetime.now(timezone.utc)
+
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        count = 0
+        for record in snapshot.get("pins", []):
+            if str(record.get("user_id") or "") != user_id:
+                continue
+            if _pin_is_active(record, now_iso):
+                count += 1
+        return count
+
+    from sqlalchemy import func, select
+
     with session_scope() as session:
         stmt = select(func.count()).select_from(pins_table).where(
             pins_table.c.user_id == user_id,
@@ -170,6 +267,15 @@ def count_active_pins_for_user(user_id: str) -> int:
 
 
 def get_pin_owner(pin_id: int) -> Optional[str]:
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        for record in snapshot.get("pins", []):
+            if int(record.get("id", 0)) == pin_id:
+                return str(record.get("user_id") or "")
+        return None
+
+    from sqlalchemy import select
+
     with session_scope() as session:
         stmt = select(pins_table.c.user_id).where(pins_table.c.id == pin_id)
         row = session.execute(stmt).scalar_one_or_none()
@@ -177,6 +283,22 @@ def get_pin_owner(pin_id: int) -> Optional[str]:
 
 
 def adjust_rating(pin_id: int, delta: int = 1) -> Optional[int]:
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        pins = list(snapshot.get("pins", []))
+        for idx, record in enumerate(pins):
+            if int(record.get("id", 0)) != pin_id:
+                continue
+            current = int(record.get("rating", 0))
+            record["rating"] = current + delta
+            pins[idx] = record
+            snapshot["pins"] = pins
+            _LOCAL_STORE.persist(snapshot)
+            return int(record["rating"])
+        return None
+
+    from sqlalchemy import update
+
     with session_scope() as session:
         stmt = (
             update(pins_table)
@@ -190,6 +312,25 @@ def adjust_rating(pin_id: int, delta: int = 1) -> Optional[int]:
 
 def cleanup_expired() -> int:
     now_iso = datetime.now(timezone.utc)
+
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        pins = list(snapshot.get("pins", []))
+        retained = []
+        deleted = 0
+        for record in pins:
+            expires_at = _coerce_dt(record.get("expires_at"))
+            if expires_at is not None and expires_at <= now_iso:
+                deleted += 1
+                continue
+            retained.append(record)
+        if deleted:
+            snapshot["pins"] = retained
+            _LOCAL_STORE.persist(snapshot)
+        return deleted
+
+    from sqlalchemy import delete
+
     with session_scope() as session:
         stmt = delete(pins_table).where(
             pins_table.c.expires_at.is_not(None),
@@ -201,6 +342,23 @@ def cleanup_expired() -> int:
 
 
 def delete_pin(pin_id: int, user_id: str) -> bool:
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        pins = list(snapshot.get("pins", []))
+        retained = []
+        deleted = 0
+        for record in pins:
+            if int(record.get("id", 0)) == pin_id and str(record.get("user_id") or "") == user_id:
+                deleted += 1
+                continue
+            retained.append(record)
+        if deleted:
+            snapshot["pins"] = retained
+            _LOCAL_STORE.persist(snapshot)
+        return deleted > 0
+
+    from sqlalchemy import delete
+
     with session_scope() as session:
         stmt = delete(pins_table).where(
             pins_table.c.id == pin_id,

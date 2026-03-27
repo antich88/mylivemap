@@ -12,6 +12,7 @@ DATABASE_PATH = DB_DIR / "live_map.db"
 DATABASE_KEY = os.environ.get("LIVE_MAP_DB_KEY", "dev-live-map-key")
 DEFAULT_SQLITE_URL = f"sqlite:///{DATABASE_PATH}"
 DATABASE_URL = os.environ.get("DATABASE_URL", DEFAULT_SQLITE_URL)
+LOCAL_PINS_PATH = DB_DIR / "pins.json"
 
 MAP_DEFAULTS = {
     "zoom": 13,
@@ -133,6 +134,21 @@ SHARING_META = {
     "site_name": "Живая карта интересов",
     "default_image": "https://example.com/static/img/og-default.png",
 }
+
+
+def is_local_mode() -> bool:
+    """Определяем режим хранения данных (local/json vs sqlalchemy)."""
+    app_mode = (os.environ.get("APP_MODE") or "").strip().lower()
+    if app_mode:
+        if app_mode == "local":
+            return True
+        if app_mode == "sqlalchemy":
+            return False
+        raise ValueError("APP_MODE должен быть 'local' или 'sqlalchemy'")
+
+    db_url = (DATABASE_URL or "").lower()
+    return "postgres" not in db_url
+
 
 def ttl_for(subcategory_slug: str) -> Optional[int]:
     return BASE_TTL_SECONDS.get(subcategory_slug)
