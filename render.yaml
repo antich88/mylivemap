@@ -18,6 +18,8 @@ services:
         fromDatabase:
           name: mylivemap-db
           property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
 databases:
   - name: mylivemap-db
     plan: free

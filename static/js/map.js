@@ -31,23 +31,52 @@ let categoryChips = [];
 let userToastTimeoutId = null;
 let lastNonCreationPopupCloseAt = 0;
 let filterPanelElement = null;
+let currentAuthUser = bootstrapData.current_user || null;
+let authToggleBtn = null;
+let authPanelElement = null;
+let authPanelVisible = false;
+const AUTH_MODES = {
+  LOGIN: 'login',
+  REGISTER: 'register',
+};
+let currentAuthMode = AUTH_MODES.LOGIN;
+
+
+function getFilterPanelElement() {
+  if (filterPanelElement && filterPanelElement.isConnected) {
+    return filterPanelElement;
+  }
+  filterPanelElement = document.querySelector('.filter-panel');
+  return filterPanelElement;
+}
 
 function isMobileViewport() {
   return window.innerWidth < MOBILE_BREAKPOINT_PX;
 }
 
-function minimizeFilterPanelForCreation() {
-  if (!filterPanelElement || !isMobileViewport()) {
+function expandFilterPanel() {
+  const panel = getFilterPanelElement();
+  if (!panel) {
     return;
   }
-  filterPanelElement.classList.add('minimized');
+  panel.classList.remove('collapsed');
+  panel.classList.remove('minimized');
+}
+
+function minimizeFilterPanelForCreation() {
+  const panel = getFilterPanelElement();
+  if (!panel || !isMobileViewport()) {
+    return;
+  }
+  panel.classList.add('minimized');
 }
 
 function restoreFilterPanelAfterCreation() {
-  if (!filterPanelElement) {
+  const panel = getFilterPanelElement();
+  if (!panel) {
     return;
   }
-  filterPanelElement.classList.remove('minimized');
+  panel.classList.remove('minimized');
 }
 
 function colorForCategorySlug(slug) {
@@ -206,7 +235,7 @@ function updateShowAllButtonAppearance() {
   showAllBtn.setAttribute('aria-pressed', String(isActive));
   const icon = showAllBtn.querySelector('.show-all-btn__icon');
   if (icon) {
-    icon.textContent = isActive ? 'ALL' : 'OFF';
+    icon.textContent = isActive ? 'ВСЕ' : 'ВЫКЛ';
   }
 }
 
@@ -284,8 +313,8 @@ function clearMarkers() {
 
 function createPopupContent(pin) {
   const category = getCategoryBySlug(pin.category_slug);
-  const currentUserId = getOrCreateLiveMapUserId();
-  const isAuthor = Boolean(currentUserId && pin.user_id && currentUserId === pin.user_id);
+  const currentNickname = currentAuthUser?.nickname || null;
+  const isAuthor = Boolean(currentNickname && pin.user_id && currentNickname === pin.user_id);
   const deleteButton = isAuthor
     ? `<button class="delete-pin delete-pin-btn" data-pin-id="${pin.id}">Удалить</button>`
     : '';
@@ -433,11 +462,11 @@ function clearCreationMarker() {
 }
 
 function countCurrentUserMarkers() {
-  const currentUserId = getOrCreateLiveMapUserId();
-  if (!currentUserId) {
+  const currentNickname = currentAuthUser?.nickname || null;
+  if (!currentNickname) {
     return 0;
   }
-  return activeMarkers.reduce((count, { pin }) => (pin.user_id === currentUserId ? count + 1 : count), 0);
+  return activeMarkers.reduce((count, { pin }) => (pin.user_id === currentNickname ? count + 1 : count), 0);
 }
 
 function hasReachedUserMarkerLimit() {
@@ -462,6 +491,265 @@ function showUserToast(message) {
   userToastTimeoutId = setTimeout(() => {
     toast.classList.remove('user-toast--visible');
   }, 3800);
+}
+
+function getAuthElements() {
+  return {
+    statusEl: document.getElementById('auth-status'),
+    messageEl: document.getElementById('auth-message'),
+    authForm: document.getElementById('auth-form'),
+    authSubmitBtn: document.getElementById('auth-submit-btn'),
+    authTitle: document.getElementById('auth-panel-title'),
+    switchText: document.getElementById('auth-switch-text'),
+    switchPrefix: document.getElementById('auth-switch-prefix'),
+    switchLink: document.getElementById('auth-switch-link'),
+    logoutBtn: document.getElementById('logout-btn'),
+    panelEl: document.getElementById('auth-panel'),
+    toggleBtn: document.getElementById('auth-toggle-btn'),
+  };
+}
+
+function setAuthMessage(text = '') {
+  const { messageEl } = getAuthElements();
+  if (!messageEl) {
+    return;
+  }
+  const normalized = typeof text === 'string' ? text.trim() : '';
+  messageEl.textContent = normalized;
+  messageEl.hidden = normalized.length === 0;
+}
+
+function clearAuthMessage() {
+  setAuthMessage('');
+}
+
+function setAuthPanelVisibility(visible) {
+  const wasVisible = authPanelVisible;
+  authPanelVisible = Boolean(visible);
+  if (authPanelElement) {
+    authPanelElement.hidden = !authPanelVisible;
+    authPanelElement.classList.toggle('is-visible', authPanelVisible);
+  }
+  if (authToggleBtn) {
+    authToggleBtn.classList.toggle('panel-round-btn--active', authPanelVisible);
+    authToggleBtn.setAttribute('aria-pressed', String(authPanelVisible));
+  }
+  if (authPanelVisible && !wasVisible) {
+    clearAuthMessage();
+  }
+}
+
+function syncAuthToggleAppearance() {
+  if (!authToggleBtn) {
+    return;
+  }
+  const label = authToggleBtn.querySelector('.panel-round-btn__label');
+  if (isAuthenticated()) {
+    authToggleBtn.classList.add('panel-round-btn--auth');
+    authToggleBtn.setAttribute('aria-label', 'Открыть панель аккаунта');
+    if (label) {
+      label.textContent = '👤';
+    }
+  } else {
+    authToggleBtn.classList.remove('panel-round-btn--auth');
+    authToggleBtn.setAttribute('aria-label', 'Открыть панель входа');
+    if (label) {
+      label.textContent = 'ВХОД';
+    }
+  }
+}
+
+function isAuthenticated() {
+  return Boolean(currentAuthUser && currentAuthUser.nickname);
+}
+
+function updateAuthModeUI() {
+  const { authTitle, authSubmitBtn, switchPrefix, switchLink } = getAuthElements();
+  if (!authTitle || !authSubmitBtn || !switchPrefix || !switchLink) {
+    return;
+  }
+  const isLogin = currentAuthMode === AUTH_MODES.LOGIN;
+  authTitle.textContent = isLogin ? 'Войдите в аккаунт' : 'Создайте аккаунт';
+  authSubmitBtn.textContent = isLogin ? 'Войти' : 'Регистрация';
+  switchPrefix.textContent = isLogin ? 'Или' : 'Уже есть аккаунт?';
+  switchLink.textContent = isLogin ? 'создайте аккаунт' : 'Войти';
+}
+
+function toggleAuthMode() {
+  currentAuthMode = currentAuthMode === AUTH_MODES.LOGIN ? AUTH_MODES.REGISTER : AUTH_MODES.LOGIN;
+  updateAuthModeUI();
+  clearAuthMessage();
+}
+
+function renderAuthState(message = '') {
+  const { statusEl, authForm, logoutBtn, switchLink, switchText, authTitle, messageEl, panelEl } = getAuthElements();
+  const authenticated = isAuthenticated();
+  const nickname = currentAuthUser?.nickname || '';
+  if (statusEl) {
+    statusEl.textContent = authenticated ? nickname : 'Не авторизован';
+  }
+  if (panelEl) {
+    panelEl.classList.toggle('auth-panel--authenticated', authenticated);
+  }
+  if (authForm) {
+    authForm.hidden = authenticated;
+  }
+  if (logoutBtn) {
+    logoutBtn.hidden = !authenticated;
+  }
+  if (switchLink) {
+    switchLink.hidden = authenticated;
+  }
+  if (switchText) {
+    switchText.hidden = authenticated;
+  }
+  if (authTitle) {
+    authTitle.hidden = authenticated;
+  }
+  if (!authenticated) {
+    setAuthMessage(message);
+    if (messageEl) {
+      messageEl.hidden = message.trim().length === 0;
+    }
+  } else {
+    clearAuthMessage();
+    if (messageEl) {
+      messageEl.hidden = true;
+    }
+  }
+  syncAuthToggleAppearance();
+}
+
+function readAuthPayload(form) {
+  const nickname = form?.elements?.nickname?.value?.trim() || '';
+  const password = form?.elements?.password?.value || '';
+  return { nickname, password };
+}
+
+function handleAuthResponse(response) {
+  return response
+    .text()
+    .then((rawBody) => {
+      let payload = {};
+      if (rawBody) {
+        try {
+          payload = JSON.parse(rawBody);
+        } catch (_error) {
+          payload = { message: rawBody };
+        }
+      }
+
+      if (!response.ok) {
+        const fallbackByStatus = {
+          400: 'Проверьте корректность имени пользователя и пароля.',
+          401: 'Неверные имя пользователя или пароль.',
+          409: 'Пользователь с таким именем уже существует.',
+          500: 'Временная ошибка сервера. Попробуйте позже.',
+        };
+        const fallback = fallbackByStatus[response.status] || `Ошибка авторизации (HTTP ${response.status}).`;
+        throw new Error(payload?.message || fallback);
+      }
+      return payload;
+    });
+}
+
+function submitAuth(endpoint, payload) {
+  return fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'same-origin',
+    body: JSON.stringify(payload),
+  }).then(handleAuthResponse);
+}
+
+function refreshCurrentUser() {
+  return fetch('/me', { credentials: 'same-origin' })
+    .then((response) => response.json())
+    .then((payload) => {
+      currentAuthUser = payload?.authenticated ? payload.user : null;
+      renderAuthState();
+    })
+    .catch(() => {
+      currentAuthUser = null;
+      renderAuthState();
+    });
+}
+
+function initAuthWidget() {
+  const { authForm, authSubmitBtn, logoutBtn, panelEl, toggleBtn, switchLink } = getAuthElements();
+  authPanelElement = panelEl || null;
+  authToggleBtn = toggleBtn || null;
+  renderAuthState();
+  updateAuthModeUI();
+  setAuthPanelVisibility(false);
+
+  if (authToggleBtn) {
+    authToggleBtn.addEventListener('click', () => {
+      if (!authPanelVisible && getFilterPanelElement()?.classList.contains('collapsed')) {
+        expandFilterPanel();
+        setAuthPanelVisibility(true);
+        return;
+      }
+      setAuthPanelVisibility(!authPanelVisible);
+    });
+  }
+
+  if (switchLink) {
+    switchLink.addEventListener('click', () => {
+      toggleAuthMode();
+    });
+  }
+
+  if (authForm) {
+    authForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const payload = readAuthPayload(authForm);
+      const endpoint = currentAuthMode === AUTH_MODES.LOGIN ? '/login' : '/register';
+      const successMessage = currentAuthMode === AUTH_MODES.LOGIN
+        ? 'Вход выполнен.'
+        : 'Регистрация завершена, вход выполнен.';
+      submitAuth(endpoint, payload)
+        .then((result) => {
+          currentAuthUser = result.user;
+          renderAuthState(successMessage);
+          setAuthPanelVisibility(false);
+          refreshMarkers();
+        })
+        .catch((error) => {
+          renderAuthState(error.message);
+        })
+        .finally(() => {
+          if (authSubmitBtn) {
+            authSubmitBtn.disabled = false;
+          }
+        });
+      if (authSubmitBtn) {
+        authSubmitBtn.disabled = true;
+      }
+    });
+  }
+
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', () => {
+      fetch('/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+      })
+        .then(() => {
+          currentAuthUser = null;
+          renderAuthState('Вы вышли из аккаунта.');
+          setAuthPanelVisibility(false);
+          refreshMarkers();
+        })
+        .catch(() => {
+          renderAuthState('Не удалось выполнить выход.');
+        });
+    });
+  }
+
+  refreshCurrentUser();
 }
 
 function copyTextToClipboard(text) {
@@ -516,6 +804,10 @@ function handleCreationSubmit(latlng, popupEl, saveBtn) {
   if (!form) {
     return;
   }
+  if (!isAuthenticated()) {
+    showUserToast('Нужно войти в аккаунт, чтобы создавать метки.');
+    return;
+  }
   const nickname = form.querySelector('[data-field="nickname"]').value.trim();
   const description = form.querySelector('[data-field="description"]').value.trim();
   const contact = form.querySelector('[data-field="contact"]').value.trim();
@@ -533,7 +825,6 @@ function handleCreationSubmit(latlng, popupEl, saveBtn) {
     contact: contact || null,
     lat: latlng.lat,
     lng: latlng.lng,
-    liveMapUserId: getOrCreateLiveMapUserId(),
   };
   saveBtn.disabled = true;
   fetch('/api/pins', {
@@ -541,6 +832,7 @@ function handleCreationSubmit(latlng, popupEl, saveBtn) {
     headers: {
       'Content-Type': 'application/json',
     },
+    credentials: 'same-origin',
     body: JSON.stringify(payload),
   })
     .then((response) => {
@@ -628,15 +920,18 @@ function updateCounters() {
 }
 
 function handleDeletePin(pinId) {
-  const payload = {
-    liveMapUserId: getOrCreateLiveMapUserId(),
-  };
+  if (!isAuthenticated()) {
+    showUserToast('Нужно войти в аккаунт, чтобы удалять метки.');
+    return;
+  }
+
   fetch(`/api/pins/${pinId}`, {
     method: 'DELETE',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(payload),
+    credentials: 'same-origin',
+    body: JSON.stringify({}),
   })
     .then((response) => {
       if (!response.ok) {
@@ -700,6 +995,8 @@ function isAnyExistingPinPopupOpen() {
 }
 
 window.addEventListener('load', function () {
+  initAuthWidget();
+
   map = L.map('leaflet-map', {
     zoomControl: true,
     attributionControl: false,
@@ -748,7 +1045,11 @@ window.addEventListener('load', function () {
     if (!filterPanel) {
       return;
     }
-    filterPanel.classList.toggle('collapsed');
+    if (filterPanel.classList.contains('collapsed')) {
+      expandFilterPanel();
+    } else {
+      collapseFilterPanelAnimated();
+    }
   };
 
   const handleTouchEnd = (e) => {
@@ -758,10 +1059,10 @@ window.addEventListener('load', function () {
     const deltaY = e.changedTouches[0].clientY - touchStartY;
     const threshold = 15;
     if (deltaY > threshold) {
-      filterPanel.classList.add('collapsed');
+      collapseFilterPanelAnimated();
       restoreFilterPanelAfterCreation();
     } else if (deltaY < -threshold) {
-      filterPanel.classList.remove('collapsed');
+      expandFilterPanel();
       restoreFilterPanelAfterCreation();
     }
     touchStartY = null;
@@ -785,6 +1086,11 @@ window.addEventListener('load', function () {
     if (window.currentCreationMarker) {
       clearCreationMarker();
       restoreFilterPanelAfterCreation();
+      return;
+    }
+
+    if (!isAuthenticated()) {
+      showUserToast('Войдите или зарегистрируйтесь, чтобы добавлять метки.');
       return;
     }
 
@@ -856,7 +1162,7 @@ window.addEventListener('load', function () {
     });
   }
 
-  filterPanelElement = document.querySelector('.filter-panel');
+  filterPanelElement = filterPanel;
 
   map.on('locationerror', () => {
     alert('Не удалось определить ваше местоположение.');
@@ -923,3 +1229,29 @@ document.addEventListener('click', function (e) {
     return;
   }
 });
+function expandFilterPanel() {
+  const panel = getFilterPanelElement();
+  if (!panel) {
+    return;
+  }
+  panel.classList.remove('collapsing');
+  panel.classList.remove('collapsed');
+  panel.classList.remove('minimized');
+}
+
+function collapseFilterPanelAnimated() {
+  const panel = getFilterPanelElement();
+  if (!panel) {
+    return;
+  }
+  if (panel.classList.contains('collapsed')) {
+    return;
+  }
+  panel.classList.add('collapsing');
+  const handleTransitionEnd = () => {
+    panel.classList.remove('collapsing');
+    panel.removeEventListener('transitionend', handleTransitionEnd);
+  };
+  panel.addEventListener('transitionend', handleTransitionEnd);
+  panel.classList.add('collapsed');
+}

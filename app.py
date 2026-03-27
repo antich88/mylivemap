@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 
-from flask import Flask, abort, jsonify, redirect, render_template, request, url_for
+from flask import Flask, abort, jsonify, redirect, render_template, request, session, url_for
 
-from config import CATEGORY_DEFINITIONS, MAP_DEFAULTS, SHARING_META
+from auth_store import create_user, get_user_by_nickname, verify_user_credentials
+from config import CATEGORY_DEFINITIONS, MAP_DEFAULTS, SECRET_KEY, SHARING_META
 from database import ensure_connection, init_schema
 from models import (
     active_pins,
@@ -23,6 +24,7 @@ USER_LIMIT_MESSAGE = (
 
 def create_app() -> Flask:
     app = Flask(__name__, static_folder="static", template_folder="templates")
+    app.secret_key = SECRET_KEY
 
     try:
         init_schema()
@@ -30,9 +32,20 @@ def create_app() -> Flask:
     except Exception as exc:  # pragma: no cover - warm-up only
         app.logger.warning("Database warm-up skipped: %s", exc)
 
+    def current_user_payload() -> dict | None:
+        nickname = session.get("user_nickname")
+        if not nickname:
+            return None
+        user = get_user_by_nickname(nickname)
+        if not user:
+            session.pop("user_nickname", None)
+            return None
+        return {"nickname": user.nickname}
+
     @app.route("/")
     def index() -> str:
         highlight_pin = request.args.get("pin", type=int)
+        current_user = current_user_payload()
         share_meta = {
             "title": SHARING_META["site_name"],
             "description": "Живая карта интересов с категориями "
@@ -44,6 +57,7 @@ def create_app() -> Flask:
             "defaults": MAP_DEFAULTS,
             "highlight_pin": highlight_pin,
             "share_meta": share_meta,
+            "current_user": current_user,
         }
         bootstrap_json = json.dumps(bootstrap_payload, ensure_ascii=False)
         return render_template(
@@ -54,7 +68,57 @@ def create_app() -> Flask:
             share_meta=share_meta,
             bootstrap_json=bootstrap_json,
             bootstrap_payload=bootstrap_payload,
+            current_user=current_user,
         )
+
+    @app.route("/register", methods=["POST"])
+    def register_user() -> tuple[dict, int]:
+        payload = request.get_json(silent=True) or {}
+        nickname = str(payload.get("nickname") or "").strip()
+        password = str(payload.get("password") or "")
+
+        if len(nickname) < 3:
+            return {"message": "Nickname должен быть не короче 3 символов."}, 400
+        if len(password) < 6:
+            return {"message": "Password должен быть не короче 6 символов."}, 400
+
+        try:
+            user = create_user(nickname, password)
+        except Exception as exc:
+            app.logger.exception("Register failed for nickname=%s: %s", nickname, exc)
+            return {"message": "Не удалось завершить регистрацию. Попробуйте позже."}, 500
+        if not user:
+            return {"message": "Пользователь с таким nickname уже существует."}, 409
+
+        session["user_nickname"] = user.nickname
+        return {"user": {"nickname": user.nickname}}, 201
+
+    @app.route("/login", methods=["POST"])
+    def login_user() -> tuple[dict, int]:
+        payload = request.get_json(silent=True) or {}
+        nickname = str(payload.get("nickname") or "").strip()
+        password = str(payload.get("password") or "")
+
+        try:
+            user = verify_user_credentials(nickname, password)
+        except Exception as exc:
+            app.logger.exception("Login failed for nickname=%s: %s", nickname, exc)
+            return {"message": "Не удалось выполнить вход. Попробуйте позже."}, 500
+        if not user:
+            return {"message": "Неверный nickname или password."}, 401
+
+        session["user_nickname"] = user.nickname
+        return {"user": {"nickname": user.nickname}}, 200
+
+    @app.route("/logout", methods=["POST"])
+    def logout_user() -> tuple[dict, int]:
+        session.pop("user_nickname", None)
+        return {"ok": True}, 200
+
+    @app.route("/me", methods=["GET"])
+    def me() -> tuple[dict, int]:
+        user = current_user_payload()
+        return {"authenticated": bool(user), "user": user}, 200
 
     @app.route("/api/pins", methods=["GET", "POST"])
     def refresh_or_create_pin():
@@ -75,11 +139,12 @@ def create_app() -> Flask:
         lat = payload.get("lat")
         lng = payload.get("lng")
         contact = payload.get("contact")
-        user_id = payload.get("liveMapUserId")
+        user = current_user_payload()
         if not all((category, subcategory, nickname, description, lat, lng)):
             abort(400)
-        if not user_id:
-            abort(400)
+        if not user:
+            return jsonify({"message": "Нужно войти в аккаунт, чтобы создавать метки."}), 401
+        user_id = user["nickname"]
         total_pins = count_active_pins_for_user(user_id)
         if total_pins >= USER_MARKER_LIMIT:
             response = jsonify({"message": USER_LIMIT_MESSAGE})
@@ -102,12 +167,10 @@ def create_app() -> Flask:
 
     @app.route("/api/pins/<int:pin_id>", methods=["DELETE"])
     def remove_pin(pin_id: int) -> tuple[dict, int]:
-        payload = request.get_json()
-        if not payload:
-            abort(400)
-        user_id = payload.get("liveMapUserId")
-        if not user_id:
-            abort(400)
+        user = current_user_payload()
+        if not user:
+            return jsonify({"message": "Нужно войти в аккаунт, чтобы удалять метки."}), 401
+        user_id = user["nickname"]
         owner = get_pin_owner(pin_id)
         if owner is None:
             abort(404)
@@ -129,6 +192,7 @@ def create_app() -> Flask:
     @app.route("/pin/<token>")
     def share_pin(token: str) -> str:
         pins = active_pins()
+        current_user = current_user_payload()
         target = next((pin for pin in pins if pin.shared_token == token), None)
         if not target:
             abort(404)
@@ -142,6 +206,7 @@ def create_app() -> Flask:
             "defaults": MAP_DEFAULTS,
             "highlight_pin": target.id,
             "share_meta": share_meta,
+            "current_user": current_user,
         }
         bootstrap_json = json.dumps(bootstrap_payload, ensure_ascii=False)
         return render_template(
@@ -152,6 +217,7 @@ def create_app() -> Flask:
             share_meta=share_meta,
             bootstrap_json=bootstrap_json,
             bootstrap_payload=bootstrap_payload,
+            current_user=current_user,
         )
 
     @app.route("/favicon.ico")

@@ -10,9 +10,11 @@ DB_DIR = PROJECT_ROOT / "data"
 DB_DIR.mkdir(exist_ok=True)
 DATABASE_PATH = DB_DIR / "live_map.db"
 DATABASE_KEY = os.environ.get("LIVE_MAP_DB_KEY", "dev-live-map-key")
+SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key-change-me")
 DEFAULT_SQLITE_URL = f"sqlite:///{DATABASE_PATH}"
 DATABASE_URL = os.environ.get("DATABASE_URL", DEFAULT_SQLITE_URL)
 LOCAL_PINS_PATH = DB_DIR / "pins.json"
+LOCAL_USERS_PATH = DB_DIR / "users.json"
 
 MAP_DEFAULTS = {
     "zoom": 13,

@@ -6,3 +6,4 @@ venv/
 .DS_Store
 data/*.db
 data/pins.json
+data/users.json

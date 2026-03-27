@@ -50,22 +50,59 @@
           </div>
           <div class="filter-panel__actions" aria-label="Панель управления фильтрами">
             <button
-              id="show-all-btn"
-              class="show-all-btn"
+              id="auth-toggle-btn"
+              class="panel-round-btn auth-toggle-btn"
               type="button"
-              aria-label="Показать все категории"
+              aria-label="Открыть панель входа"
             >
-              <span class="show-all-btn__icon" aria-hidden="true">ALL</span>
+              <span class="panel-round-btn__label">ВХОД</span>
             </button>
-            <button
-              id="refresh-btn"
-              class="refresh-btn"
-              type="button"
-              aria-label="Обновить метки"
-            >
-              <span class="refresh-btn__icon" aria-hidden="true">🔄</span>
-            </button>
+            <div class="filter-panel__actions-right">
+              <button
+                id="show-all-btn"
+                class="panel-round-btn show-all-btn"
+                type="button"
+                aria-label="Показать все категории"
+              >
+                <span class="show-all-btn__icon" aria-hidden="true">ВСЕ</span>
+              </button>
+              <button
+                id="refresh-btn"
+                class="refresh-btn"
+                type="button"
+                aria-label="Обновить метки"
+              >
+                <span class="refresh-btn__icon" aria-hidden="true">🔄</span>
+              </button>
+            </div>
           </div>
+          <section class="auth-widget" aria-label="Авторизация">
+            <div id="auth-status" class="auth-widget__status">Не авторизован</div>
+            <div id="auth-message" class="auth-widget__message" role="status" aria-live="polite"></div>
+
+            <div id="auth-panel" class="auth-panel" hidden>
+              <h3 class="auth-panel__title" id="auth-panel-title">Войдите в аккаунт</h3>
+
+              <form id="auth-form" class="auth-panel__form" autocomplete="on">
+                <label class="auth-field">
+                  <span class="auth-field__icon" aria-hidden="true">👤</span>
+                  <input name="nickname" type="text" minlength="3" required placeholder="Имя пользователя" />
+                </label>
+                <label class="auth-field">
+                  <span class="auth-field__icon" aria-hidden="true">🔒</span>
+                  <input name="password" type="password" minlength="6" required placeholder="Пароль" />
+                </label>
+                <button id="auth-submit-btn" type="submit" class="auth-panel__submit">Войти</button>
+              </form>
+
+              <p class="auth-panel__hint" id="auth-switch-text">
+                <span class="auth-panel__hint-prefix" id="auth-switch-prefix">Или</span>
+                <button type="button" class="auth-panel__switch-link" id="auth-switch-link">создайте аккаунт</button>
+              </p>
+
+              <button id="logout-btn" class="auth-panel__logout" type="button" hidden>Выйти</button>
+            </div>
+          </section>
         </header>
     <main class="map-shell">
       <div id="leaflet-map"></div>

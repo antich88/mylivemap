@@ -55,6 +55,7 @@ if LOCAL_MODE:
 
     metadata = None  # type: ignore
     pins_table = None  # type: ignore
+    users_table = None  # type: ignore
 
 else:
     from sqlalchemy import (
@@ -123,6 +124,16 @@ else:
         Column("shared_token", String(255), unique=True),
         Column("user_id", String(255), nullable=False, default=""),
         UniqueConstraint("shared_token", name="uq_pins_shared_token"),
+    )
+
+    users_table = Table(
+        "users",
+        metadata,
+        Column("id", Integer, primary_key=True),
+        Column("nickname", String(255), nullable=False, unique=True),
+        Column("password_hash", String(512), nullable=False),
+        Column("created_at", DateTime(timezone=True), nullable=False),
+        UniqueConstraint("nickname", name="uq_users_nickname"),
     )
 
 
