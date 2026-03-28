@@ -543,3 +543,40 @@ def delete_pin(pin_id: int, user_id: str) -> bool:
         result = session.execute(stmt)
         deleted = result.rowcount or 0
     return deleted > 0
+
+
+def reassign_user_id(old_user_id: str, new_user_id: str) -> int:
+    """Переназначает владельца во всех активных пинах."""
+    old_user_id = (old_user_id or "").strip()
+    new_user_id = (new_user_id or "").strip()
+    if not old_user_id or not new_user_id:
+        raise ValueError("Некорректные имена пользователей для обновления user_id.")
+    if old_user_id == new_user_id:
+        return 0
+
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        pins = list(snapshot.get("pins", []))
+        updated = 0
+        for idx, record in enumerate(pins):
+            if str(record.get("user_id") or "") != old_user_id:
+                continue
+            record = dict(record)
+            record["user_id"] = new_user_id
+            pins[idx] = record
+            updated += 1
+        if updated:
+            snapshot["pins"] = pins
+            _LOCAL_STORE.persist(snapshot)
+        return updated
+
+    from sqlalchemy import update
+
+    with session_scope() as session:
+        stmt = (
+            update(pins_table)
+            .where(pins_table.c.user_id == old_user_id)
+            .values(user_id=new_user_id)
+        )
+        result = session.execute(stmt)
+        return result.rowcount or 0

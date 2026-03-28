@@ -56,12 +56,14 @@ if LOCAL_MODE:
     metadata = None  # type: ignore
     pins_table = None  # type: ignore
     users_table = None  # type: ignore
+    profiles_table = None  # type: ignore
 
 else:
     from sqlalchemy import (
         Column,
         DateTime,
         Float,
+        ForeignKey,
         Integer,
         MetaData,
         String,
@@ -134,6 +136,17 @@ else:
         Column("password_hash", String(512), nullable=False),
         Column("created_at", DateTime(timezone=True), nullable=False),
         UniqueConstraint("nickname", name="uq_users_nickname"),
+    )
+
+    profiles_table = Table(
+        "user_profiles",
+        metadata,
+        Column("nickname", String(255), ForeignKey("users.nickname", ondelete="CASCADE"), primary_key=True),
+        Column("age", Integer),
+        Column("gender", String(16)),
+        Column("avatar_path", String(512)),
+        Column("created_at", DateTime(timezone=True), nullable=False),
+        Column("updated_at", DateTime(timezone=True), nullable=False),
     )
 
 

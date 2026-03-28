@@ -26,88 +26,212 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
   </head>
   <body>
+    {% set gender_labels = {'M': 'Мужской', 'F': 'Женский'} %}
       <div class="page-shell">
         <header class="filter-panel">
-          <div class="panel-handle-container" role="button" aria-label="Переключить панель фильтров" tabindex="0">
-            <div class="panel-handle" aria-hidden="true"></div>
-          </div>
-          <div class="category-chips">
-            {% for group in categories %}
+        <div class="panel-handle-container" role="button" aria-label="Переключить панель фильтров" tabindex="0">
+          <div class="panel-handle" aria-hidden="true"></div>
+        </div>
+        <div class="filter-panel__actions" aria-label="Панель управления фильтрами">
+          <button
+            id="auth-toggle-btn"
+            class="panel-round-btn auth-toggle-btn"
+            type="button"
+            aria-label="Открыть панель входа"
+          >
+            <span class="panel-round-btn__avatar" aria-hidden="true">
+              <img src="" alt="Аватар пользователя" />
+            </span>
+            <span class="panel-round-btn__label">ВХОД</span>
+          </button>
+          <div class="filter-panel__actions-right">
             <button
-              class="category-chip"
-              data-category-slug="{{ group.slug }}"
-              style="--chip-color: {{ group.color }}"
-              data-color="{{ group.color }}"
-              data-icon="{{ group.icon }}"
-              aria-pressed="false"
-            >
-              <span class="category-chip__icon">{{ group.icon }}</span>
-              <span class="category-chip__label">{{ group.label }}</span>
-              <span class="category-count">0</span>
-            </button>
-            {% endfor %}
-            <button class="btn reset-btn" id="reset-btn">✖️ Сброс</button>
-          </div>
-          <div class="filter-panel__actions" aria-label="Панель управления фильтрами">
-            <button
-              id="auth-toggle-btn"
-              class="panel-round-btn auth-toggle-btn"
+              id="show-all-btn"
+              class="panel-round-btn show-all-btn"
               type="button"
-              aria-label="Открыть панель входа"
+              aria-label="Переключить режим «ВКЛ» для всех категорий"
             >
-              <span class="panel-round-btn__label">ВХОД</span>
+              <span class="show-all-btn__icon" aria-hidden="true">ВКЛ</span>
             </button>
-            <div class="filter-panel__actions-right">
+            <button
+              id="refresh-btn"
+              class="refresh-btn"
+              type="button"
+              aria-label="Обновить метки"
+            >
+              <span class="refresh-btn__icon" aria-hidden="true">🔄</span>
+            </button>
+          </div>
+        </div>
+        <div class="filter-panel__body">
+          <div class="filter-panel__pane filter-panel__pane--categories">
+            <div class="category-chips">
+              {% for group in categories %}
               <button
-                id="show-all-btn"
-                class="panel-round-btn show-all-btn"
-                type="button"
-                aria-label="Переключить режим «ВКЛ» для всех категорий"
+                class="category-chip"
+                data-category-slug="{{ group.slug }}"
+                style="--chip-color: {{ group.color }}"
+                data-color="{{ group.color }}"
+                data-icon="{{ group.icon }}"
+                aria-pressed="false"
               >
-                <span class="show-all-btn__icon" aria-hidden="true">ВКЛ</span>
+                <span class="category-chip__icon">{{ group.icon }}</span>
+                <span class="category-chip__label">{{ group.label }}</span>
+                <span class="category-count">0</span>
               </button>
-              <button
-                id="refresh-btn"
-                class="refresh-btn"
-                type="button"
-                aria-label="Обновить метки"
-              >
-                <span class="refresh-btn__icon" aria-hidden="true">🔄</span>
-              </button>
+              {% endfor %}
+              <button class="btn reset-btn" id="reset-btn">✖️ Сброс</button>
             </div>
           </div>
-          <section class="auth-widget" aria-label="Авторизация">
-            <div id="auth-status" class="auth-widget__status">Не авторизован</div>
-            <div id="auth-message" class="auth-widget__message" role="status" aria-live="polite"></div>
+        <div class="filter-panel__pane filter-panel__pane--profile">
+          <section class="user-panel" aria-label="Личный кабинет" aria-expanded="false" data-profile-mode="view">
+            <div class="user-panel__header">
+              <div class="user-panel__title">
+                <span class="user-panel__eyebrow">Личный кабинет</span>
+                <span id="auth-status" class="user-panel__nickname" aria-live="polite">{{ current_user.nickname if current_user else 'Гость' }}</span>
+              </div>
+              <div class="user-panel__actions">
+                <button type="button" class="profile-mode-btn" data-profile-action="toggle-edit" aria-pressed="false" data-profile-view-only>Редактировать профиль</button>
+              </div>
+            </div>
 
-            <div id="auth-panel" class="auth-panel" hidden>
-              <h3 class="auth-panel__title" id="auth-panel-title">Войдите в аккаунт</h3>
+            <div id="auth-message" class="user-panel__message" role="status" aria-live="polite"></div>
 
-              <form id="auth-form" class="auth-panel__form" autocomplete="on">
-                 <label class="auth-field">
-                   <span class="auth-field__icon" aria-hidden="true">👤</span>
-                   <input name="nickname" type="text" minlength="3" required placeholder="Имя пользователя" autocomplete="username" />
-                 </label>
-                  <label class="auth-field">
-                    <span class="auth-field__icon" aria-hidden="true">🔒</span>
-                    <input name="password" type="password" minlength="6" required placeholder="Пароль" autocomplete="new-password" />
-                  </label>
-                  <label class="auth-field auth-field--register-only" data-auth-mode="register" hidden>
-                    <span class="auth-field__icon" aria-hidden="true">🔒</span>
-                    <input name="password_confirm" type="password" minlength="6" placeholder="Повторите пароль" autocomplete="off" />
-                  </label>
-                <button id="auth-submit-btn" type="submit" class="auth-panel__submit">Войти</button>
-              </form>
+            <div class="user-panel__content">
+              <div class="user-panel__settings">
+                <form id="profile-form" class="profile-form" autocomplete="off">
+                  <div class="profile-avatar" data-profile-section="avatar">
+                    <div class="profile-avatar__image" role="presentation">
+                      <img src="{{ current_user.avatar_url if current_user and current_user.avatar_url else '' }}" alt="Аватар" {% if not current_user or not current_user.avatar_url %}hidden{% endif %} />
+                      <span class="profile-avatar__placeholder" aria-hidden="true" {% if current_user and current_user.avatar_url %}hidden{% endif %}>👤</span>
+                      <button type="button" class="profile-avatar__upload" aria-label="Изменить фото" data-profile-action="upload-avatar">📷</button>
+                    </div>
+                    <input type="file" accept="image/*" name="profile_avatar" id="profile-avatar-input" hidden />
+                  </div>
 
-              <p class="auth-panel__hint" id="auth-switch-text">
-                <span class="auth-panel__hint-prefix" id="auth-switch-prefix">Или</span>
-                <button type="button" class="auth-panel__switch-link" id="auth-switch-link">создайте аккаунт</button>
-              </p>
+                  <div class="user-panel__stack" id="user-panel-stack">
+                    <div class="profile-view-state" data-profile-view>
+                      <p class="profile-view-state__nickname" id="profile-view-nickname">{{ current_user.nickname if current_user else 'Гость' }}</p>
+                      <div class="profile-view-state__meta">
+                        <span class="profile-view-state__meta-item">
+                          <span class="profile-view-state__meta-label">Возраст</span>
+                          <span id="profile-view-age">{{ current_user.age if current_user and current_user.age else '—' }}</span>
+                        </span>
+                        <span class="profile-view-state__meta-item">
+                          <span class="profile-view-state__meta-label">Пол</span>
+                          <span id="profile-view-gender">{{ gender_labels.get(current_user.gender, '—') if current_user else '—' }}</span>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="profile-form__inputs">
+                      <label class="user-panel__field user-panel__field--inline">
+                        <span class="user-panel__label">Никнейм</span>
+                        <div class="user-panel__input-row">
+                          <input
+                            class="user-panel__input"
+                            name="profile_display_name"
+                            type="text"
+                            placeholder="Введите имя"
+                            autocomplete="off"
+                            maxlength="16"
+                            value="{{ current_user.nickname if current_user else '' }}"
+                            aria-describedby="display-name-hint"
+                            data-profile-field="display-name"
+                          />
+                        </div>
+                        <span id="display-name-hint" class="user-panel__hint">До 16 символов, без эмодзи.</span>
+                      </label>
 
-              <button id="logout-btn" class="auth-panel__logout" type="button" hidden>Выйти</button>
+                      <label class="user-panel__field">
+                        <span class="user-panel__label">Возраст</span>
+                        <input
+                          class="user-panel__input"
+                          name="profile_age"
+                          type="number"
+                          inputmode="numeric"
+                          min="0"
+                          max="120"
+                          placeholder="21"
+                          autocomplete="off"
+                          data-profile-field="age"
+                        />
+                      </label>
+
+                      <label class="user-panel__field">
+                        <span class="user-panel__label">Пол</span>
+                        <select class="user-panel__select" name="profile_gender" data-profile-field="gender">
+                          <option value="" hidden>Выберите</option>
+                          <option value="M">Мужской</option>
+                          <option value="F">Женский</option>
+                        </select>
+                      </label>
+
+                      <div class="profile-actions profile-actions--sticky" role="group" aria-label="Действия с профилем">
+                        <button type="button" class="profile-action profile-action--cancel" data-profile-action="cancel" disabled>Отмена</button>
+                        <button type="submit" class="profile-action profile-action--save" data-profile-action="save" disabled>Сохранить</button>
+                      </div>
+                    </div>
+                  </div>
+                </form>
+
+                <div class="password-collapse" data-password-state="collapsed">
+                  <button class="user-panel__password-btn" type="button" data-password-action="toggle">Изменить пароль</button>
+                  <form id="password-form" class="password-form" hidden autocomplete="off">
+                    <label class="user-panel__field">
+                      <span class="user-panel__label">Текущий пароль</span>
+                      <input class="user-panel__input" name="current_password" type="password" autocomplete="current-password" minlength="6" />
+                    </label>
+                    <label class="user-panel__field">
+                      <span class="user-panel__label">Новый пароль</span>
+                      <input class="user-panel__input" name="new_password" type="password" autocomplete="new-password" minlength="6" />
+                    </label>
+                    <label class="user-panel__field">
+                      <span class="user-panel__label">Повторите новый пароль</span>
+                      <input class="user-panel__input" name="new_password_confirm" type="password" autocomplete="new-password" minlength="6" />
+                    </label>
+                    <div class="password-actions">
+                      <button type="button" class="profile-action profile-action--cancel" data-password-action="cancel">Отмена</button>
+                      <button type="submit" class="profile-action profile-action--save" data-password-action="save">Сохранить</button>
+                    </div>
+                  </form>
+                </div>
+
+                <div class="user-panel__footer">
+                  <button id="logout-btn" class="user-panel__logout" type="button" hidden>Выйти</button>
+                </div>
+              </div>
+
+              <div class="user-panel__auth" aria-live="polite">
+                <div id="auth-panel" class="auth-panel" hidden>
+                  <h3 class="auth-panel__title" id="auth-panel-title">Войдите в аккаунт</h3>
+
+                  <form id="auth-form" class="auth-panel__form" autocomplete="on">
+                    <label class="auth-field">
+                      <span class="auth-field__icon" aria-hidden="true">👤</span>
+                       <input name="nickname" type="text" minlength="3" maxlength="16" required placeholder="Имя пользователя" autocomplete="username" />
+                    </label>
+                    <label class="auth-field">
+                      <span class="auth-field__icon" aria-hidden="true">🔒</span>
+                      <input name="password" type="password" minlength="6" required placeholder="Пароль" autocomplete="new-password" />
+                    </label>
+                    <label class="auth-field auth-field--register-only" data-auth-mode="register" hidden>
+                      <span class="auth-field__icon" aria-hidden="true">🔒</span>
+                      <input name="password_confirm" type="password" minlength="6" placeholder="Повторите пароль" autocomplete="off" />
+                    </label>
+                    <button id="auth-submit-btn" type="submit" class="auth-panel__submit">Войти</button>
+                  </form>
+
+                  <p class="auth-panel__hint" id="auth-switch-text">
+                    <span class="auth-panel__hint-prefix" id="auth-switch-prefix">Или</span>
+                    <button type="button" class="auth-panel__switch-link" id="auth-switch-link">создайте аккаунт</button>
+                  </p>
+                </div>
+              </div>
             </div>
           </section>
-        </header>
+        </div>
+      </div>
+    </header>
     <main class="map-shell">
       <div id="leaflet-map"></div>
     </main>

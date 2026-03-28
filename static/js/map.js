@@ -3,10 +3,10 @@ const bootstrapData = bootstrapScript ? JSON.parse(bootstrapScript.textContent) 
 const defaults = bootstrapData.defaults || { lat: 55.75, lng: 37.61, zoom: 13 };
 const categoriesScript = document.getElementById('category-definitions');
 const categoriesData = categoriesScript ? JSON.parse(categoriesScript.textContent) : [];
-const activeMarkers = [];
-const activeCategorySlugs = new Set();
-const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 const allCategorySlugs = categoriesData.map((group) => group.slug).filter(Boolean);
+const activeMarkers = [];
+const activeCategorySlugs = new Set(allCategorySlugs);
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 const LIVE_MAP_USER_ID_STORAGE_KEY = 'liveMapUserId';
 const SHOW_ALL_MODES = { ALL: 'all', OFF: 'off' };
 const AUTO_REFRESH_INTERVAL = 60_000;
@@ -18,11 +18,13 @@ const MOBILE_BREAKPOINT_PX = 768;
 const USER_LIMIT_MESSAGE = 'Вы достигли лимита в 5 меток. Пожалуйста, удалите старую или дождитесь её исчезновения.';
 const POPUP_REOPEN_GUARD_MS = 200;
 const COMMENT_MAX_LENGTH = 500;
+const DEBUG_FILTER_PANEL = false;
 
 window.currentCreationMarker = null;
 window.userLocationMarker = null;
 let userLocationIcon = null;
 let map;
+let pendingSharedPinToken = null;
 let creationSelection = getDefaultCreationSelection();
 let touchStartY = null;
 let showAllMode = SHOW_ALL_MODES.OFF;
@@ -46,7 +48,19 @@ const AUTH_MODES = {
   LOGIN: 'login',
   REGISTER: 'register',
 };
+const PROFILE_GENDER_LABELS = {
+  M: 'Мужской',
+  F: 'Женский',
+  X: 'Другое',
+};
 let currentAuthMode = AUTH_MODES.LOGIN;
+let resetProfileToViewMode = null;
+
+function ensureProfileViewMode() {
+  if (typeof resetProfileToViewMode === 'function') {
+    resetProfileToViewMode();
+  }
+}
 
 
 function getFilterPanelElement() {
@@ -55,6 +69,34 @@ function getFilterPanelElement() {
   }
   filterPanelElement = document.querySelector('.filter-panel');
   return filterPanelElement;
+}
+
+function logFilterPanelState(stage, extra = {}) {
+  if (!DEBUG_FILTER_PANEL) {
+    return;
+  }
+  const panel = getFilterPanelElement();
+  if (!panel) {
+    console.debug('[filter-panel-debug]', { stage, panelFound: false, ...extra });
+    return;
+  }
+  const computed = window.getComputedStyle(panel);
+  const chips = panel.querySelector('.category-chips');
+  const chipsComputed = chips ? window.getComputedStyle(chips) : null;
+  console.debug('[filter-panel-debug]', {
+    stage,
+    panelFound: true,
+    classes: Array.from(panel.classList),
+    minimizeDepth: filterPanelMinimizeDepth,
+    panelPointerEvents: computed.pointerEvents,
+    panelVisibility: computed.visibility,
+    panelOpacity: computed.opacity,
+    panelDisplay: computed.display,
+    chipsPointerEvents: chipsComputed?.pointerEvents,
+    chipsVisibility: chipsComputed?.visibility,
+    chipsOpacity: chipsComputed?.opacity,
+    ...extra,
+  });
 }
 
 function isMobileViewport() {
@@ -78,9 +120,11 @@ function minimizeFilterPanelForMobile(reason = 'generic') {
   if (!panel) {
     return;
   }
+  logFilterPanelState('before-minimize', { reason });
   filterPanelMinimizeDepth = Math.max(0, filterPanelMinimizeDepth) + 1;
   panel.dataset.minimizeReason = reason;
   panel.classList.add('minimized');
+  logFilterPanelState('after-minimize', { reason });
 }
 
 function releaseFilterPanelForMobile() {
@@ -88,11 +132,13 @@ function releaseFilterPanelForMobile() {
   if (!panel) {
     return;
   }
+  logFilterPanelState('before-release');
   filterPanelMinimizeDepth = Math.max(0, filterPanelMinimizeDepth - 1);
   if (filterPanelMinimizeDepth === 0) {
     delete panel.dataset.minimizeReason;
     panel.classList.remove('minimized');
   }
+  logFilterPanelState('after-release');
 }
 
 function minimizeFilterPanelForCreation() {
@@ -257,62 +303,65 @@ function removeUserAccuracyCircle() {
   window.userAccuracyCircle = null;
 }
 
-function setShowAllMode(mode) {
-  if (!Object.values(SHOW_ALL_MODES).includes(mode)) {
+function setShowAllMode(forceMode) {
+  const nextMode = forceMode || (areAllCategoriesActive() ? SHOW_ALL_MODES.OFF : SHOW_ALL_MODES.ALL);
+  if (!Object.values(SHOW_ALL_MODES).includes(nextMode)) {
     return;
   }
-  if (showAllMode === mode) {
-    return;
-  }
-  showAllMode = mode;
-  updateShowAllButtonAppearance();
+  showAllMode = nextMode;
   if (showAllMode === SHOW_ALL_MODES.ALL) {
     activateAllCategories();
   } else {
     deactivateAllCategories();
   }
-  syncShowAllMode();
+  updateFiltersUi();
 }
 
 function updateShowAllButtonAppearance() {
   if (!showAllBtn) {
     return;
   }
-  const isActive = showAllMode === SHOW_ALL_MODES.ALL;
+  const allActive = areAllCategoriesActive();
+  const noneActive = activeCategorySlugs.size === 0;
+  const isActive = allActive;
   showAllBtn.classList.toggle('show-all-btn--active', isActive);
-  showAllBtn.classList.toggle('show-all-btn--off', !isActive);
+  showAllBtn.classList.toggle('show-all-btn--off', noneActive);
   showAllBtn.setAttribute('aria-pressed', String(isActive));
   const icon = showAllBtn.querySelector('.show-all-btn__icon');
   if (icon) {
-    icon.textContent = isActive ? 'ВКЛ' : 'ВЫКЛ';
+    icon.textContent = noneActive ? 'ВЫКЛ' : 'ВКЛ';
   }
 }
 
-function syncShowAllMode() {
+function areAllCategoriesActive() {
+  return activeCategorySlugs.size === allCategorySlugs.length;
+}
+
+function updateFiltersUi() {
+  syncCategoryChipsWithActiveSet();
+  updateShowAllButtonAppearance();
   applyCategoryFilters();
 }
 
-function activateAllCategories() {
+function syncCategoryChipsWithActiveSet() {
   if (!categoryChips.length) {
     return;
   }
-  activeCategorySlugs.clear();
-  allCategorySlugs.forEach((slug) => activeCategorySlugs.add(slug));
   categoryChips.forEach((chip) => {
-    chip.classList.add('is-active');
-    chip.setAttribute('aria-pressed', 'true');
+    const slug = chip.dataset.categorySlug;
+    const isActive = slug ? activeCategorySlugs.has(slug) : false;
+    chip.classList.toggle('is-active', isActive);
+    chip.setAttribute('aria-pressed', String(isActive));
   });
 }
 
-function deactivateAllCategories() {
-  if (!categoryChips.length) {
-    return;
-  }
+function activateAllCategories() {
   activeCategorySlugs.clear();
-  categoryChips.forEach((chip) => {
-    chip.classList.remove('is-active');
-    chip.setAttribute('aria-pressed', 'false');
-  });
+  allCategorySlugs.forEach((slug) => activeCategorySlugs.add(slug));
+}
+
+function deactivateAllCategories() {
+  activeCategorySlugs.clear();
 }
 
 function fetchPins() {
@@ -322,6 +371,7 @@ function fetchPins() {
       const popupState = captureOpenPinPopupState();
       reconcilePins(pins);
       applyCategoryFilters();
+      focusSharedPinIfNeeded();
       updateCounters();
       restoreOpenPinPopupState(popupState);
     })
@@ -435,6 +485,48 @@ function reconcilePins(nextPins) {
     }
     updateMarkerFromPin(existingEntry, normalizedPin);
   });
+}
+
+function extractSharedPinTokenFromPath(pathname) {
+  const rawPath = typeof pathname === 'string' ? pathname : window.location.pathname || '';
+  if (!rawPath.toLowerCase().startsWith('/pin/')) {
+    return null;
+  }
+  const tokenCandidate = rawPath.slice(5).split('/')[0];
+  if (!tokenCandidate) {
+    return null;
+  }
+  try {
+    const decoded = decodeURIComponent(tokenCandidate.trim());
+    return decoded || null;
+  } catch (_error) {
+    return tokenCandidate.trim() || null;
+  }
+}
+
+function parseSharedPinTokenFromUrl() {
+  pendingSharedPinToken = extractSharedPinTokenFromPath(window.location.pathname);
+}
+
+function focusSharedPinIfNeeded() {
+  if (!pendingSharedPinToken || !map) {
+    return;
+  }
+  const targetEntry = activeMarkers.find(({ pin }) => pin?.shared_token && pin.shared_token === pendingSharedPinToken);
+  if (!targetEntry) {
+    return;
+  }
+  const { marker } = targetEntry;
+  const latlng = typeof marker.getLatLng === 'function' ? marker.getLatLng() : null;
+  if (latlng) {
+    map.setView(latlng, 15, { animate: true });
+  }
+  if (typeof marker.openPopup === 'function') {
+    marker.openPopup();
+  } else if (typeof marker.fire === 'function') {
+    marker.fire('click');
+  }
+  pendingSharedPinToken = null;
 }
 
 function captureOpenPinPopupState() {
@@ -901,16 +993,6 @@ function getCreationPopupContent(latlng) {
 function placeCreationMarker(latlng) {
   clearCreationMarker();
 
-  const panel = document.querySelector('.filter-panel')
-    || document.querySelector('header')
-    || document.getElementById('filter-panel');
-  if (panel) {
-    panel.classList.add('minimized');
-    console.log('Панель найдена и класс добавлен');
-  } else {
-    alert('Критическая ошибка: Панель фильтров не найдена в коде!');
-  }
-
   creationSelection = getDefaultCreationSelection();
   const tempColor = colorForCategorySlug(creationSelection.categorySlug);
   const { strokeOpacity, fillOpacity } = computeOpacityFromTTL(Number.POSITIVE_INFINITY);
@@ -925,15 +1007,13 @@ function placeCreationMarker(latlng) {
   marker.isCreationMarker = true;
   window.currentCreationMarker = marker;
   marker.addTo(map);
-  marker
-    .bindPopup(getCreationPopupContent(latlng), {
-      closeOnClick: false,
-      autoPan: true,
-      keepInView: true,
-      autoPanPaddingTopLeft: L.point(12, 12),
-      autoPanPaddingBottomRight: L.point(12, 12),
-    })
-    .openPopup();
+  marker.bindPopup(getCreationPopupContent(latlng), {
+    closeOnClick: false,
+    autoPan: true,
+    keepInView: true,
+    autoPanPaddingTopLeft: L.point(12, 12),
+    autoPanPaddingBottomRight: L.point(12, 12),
+  });
   marker.on('popupopen', (event) => {
     applyPopupFadeEffect(event.popup);
     minimizeFilterPanelForCreation();
@@ -942,17 +1022,11 @@ function placeCreationMarker(latlng) {
     clearCreationMarker();
     restoreFilterPanelAfterCreation();
   });
+  marker.openPopup();
   return marker;
 }
 
 function clearCreationMarker() {
-  const panel = document.querySelector('.filter-panel')
-    || document.querySelector('header')
-    || document.getElementById('filter-panel');
-  if (panel) {
-    panel.classList.remove('minimized');
-  }
-
   const markerToRemove = window.currentCreationMarker;
   if (!markerToRemove) {
     return;
@@ -1040,8 +1114,27 @@ function setAuthPanelVisibility(visible) {
     authToggleBtn.classList.toggle('panel-round-btn--active', authPanelVisible);
     authToggleBtn.setAttribute('aria-pressed', String(authPanelVisible));
   }
+  toggleUserPanelExpandedState(authPanelVisible);
   if (authPanelVisible && !wasVisible) {
     clearAuthMessage();
+  }
+}
+
+function toggleUserPanelExpandedState(expanded) {
+  const panel = document.querySelector('.user-panel');
+  const filterShell = getFilterPanelElement();
+  const content = panel?.querySelector('.user-panel__content');
+  panel?.setAttribute('aria-expanded', String(Boolean(expanded)));
+  filterShell?.classList.toggle('filter-panel--user-expanded', expanded);
+  content?.classList.toggle('is-visible', expanded);
+  const chips = filterShell?.querySelector('.category-chips');
+  chips?.classList.toggle('is-hidden', expanded);
+  if (expanded) {
+    chips?.setAttribute('aria-hidden', 'true');
+    panel?.setAttribute('data-panel-visible', 'profile');
+  } else {
+    chips?.removeAttribute('aria-hidden');
+    panel?.removeAttribute('data-panel-visible');
   }
 }
 
@@ -1062,6 +1155,21 @@ function syncAuthToggleAppearance() {
     if (label) {
       label.textContent = 'ВХОД';
     }
+  }
+}
+
+function setAuthToggleAvatar(url) {
+  const button = document.getElementById('auth-toggle-btn');
+  const avatarImg = button?.querySelector('.panel-round-btn__avatar img');
+  if (!button || !avatarImg) {
+    return;
+  }
+  if (url) {
+    avatarImg.src = url;
+    button.classList.add('panel-round-btn--has-avatar');
+  } else {
+    avatarImg.removeAttribute('src');
+    button.classList.remove('panel-round-btn--has-avatar');
   }
 }
 
@@ -1130,15 +1238,32 @@ function syncPasswordAutocomplete() {
   }
 }
 
+function emitProfileAuthEvent(detail = {}) {
+  try {
+    document.dispatchEvent(new CustomEvent('profile:auth-state-changed', { detail }));
+  } catch (error) {
+    console.warn('Не удалось отправить событие профиля', error);
+  }
+}
+
 function renderAuthState(message = '') {
   const { statusEl, authForm, logoutBtn, switchLink, switchText, authTitle, messageEl, panelEl } = getAuthElements();
   const authenticated = isAuthenticated();
   const nickname = currentAuthUser?.nickname || '';
+  const displayNameInput = document.querySelector('.user-panel__input[name="profile_display_name"]');
+  const userPanelEl = document.querySelector('.user-panel');
+  if (displayNameInput) {
+    displayNameInput.value = nickname;
+    displayNameInput.disabled = !authenticated;
+  }
   if (statusEl) {
     statusEl.textContent = authenticated ? nickname : 'Не авторизован';
   }
   if (panelEl) {
     panelEl.classList.toggle('auth-panel--authenticated', authenticated);
+  }
+  if (userPanelEl) {
+    userPanelEl.classList.toggle('user-panel--guest', !authenticated);
   }
   if (authForm) {
     authForm.hidden = authenticated;
@@ -1167,6 +1292,316 @@ function renderAuthState(message = '') {
     }
   }
   syncAuthToggleAppearance();
+  setAuthToggleAvatar(authenticated ? currentAuthUser?.avatar_url : null);
+  emitProfileAuthEvent({ authenticated, user: currentAuthUser, message });
+}
+
+function initProfileSettings() {
+  const profileSection = document.querySelector('.user-panel');
+  const profileForm = document.getElementById('profile-form');
+  const passwordForm = document.getElementById('password-form');
+  const avatarInput = document.getElementById('profile-avatar-input');
+  const avatarPreview = document.querySelector('.profile-avatar__image');
+  const avatarPlaceholder = avatarPreview?.querySelector('.profile-avatar__placeholder');
+  const avatarImg = avatarPreview?.querySelector('img');
+  const avatarUploadBtn = document.querySelector('[data-profile-action="upload-avatar"]');
+  const editToggleBtn = document.querySelector('[data-profile-action="toggle-edit"]');
+  const cancelBtn = document.querySelector('[data-profile-action="cancel"]');
+  const saveBtn = document.querySelector('[data-profile-action="save"]');
+  const passwordToggleBtn = document.querySelector('[data-password-action="toggle"]');
+  const passwordCancelBtn = document.querySelector('[data-password-action="cancel"]');
+  const passwordSaveBtn = document.querySelector('[data-password-action="save"]');
+  const profileView = profileSection?.querySelector('[data-profile-view]');
+  const profileViewNicknameEl = document.getElementById('profile-view-nickname');
+  const profileViewAgeEl = document.getElementById('profile-view-age');
+  const profileViewGenderEl = document.getElementById('profile-view-gender');
+  if (!profileSection || !profileForm) {
+    return;
+  }
+
+  const formFields = {
+    displayName: profileForm.querySelector('[data-profile-field="display-name"]'),
+    age: profileForm.querySelector('[data-profile-field="age"]'),
+    gender: profileForm.querySelector('[data-profile-field="gender"]'),
+  };
+
+  let profileSnapshot = {};
+  let profileMode = 'view';
+  let passwordState = 'collapsed';
+
+   const formatProfileAge = (value) => {
+     if (value === null || value === undefined || value === '') {
+       return '—';
+     }
+     return String(value);
+   };
+
+   const formatProfileGender = (value) => PROFILE_GENDER_LABELS[value] || '—';
+
+   const updateProfileViewState = () => {
+     if (profileView) {
+       profileView.setAttribute('aria-hidden', String(profileMode === 'edit'));
+     }
+     if (profileViewNicknameEl) {
+       profileViewNicknameEl.textContent = profileSnapshot.nickname || 'Гость';
+     }
+     if (profileViewAgeEl) {
+       profileViewAgeEl.textContent = formatProfileAge(profileSnapshot.age);
+     }
+     if (profileViewGenderEl) {
+       profileViewGenderEl.textContent = formatProfileGender(profileSnapshot.gender);
+     }
+   };
+
+   const syncProfileSnapshot = () => {
+    profileSnapshot = {
+      nickname: currentAuthUser?.nickname || '',
+      age: currentAuthUser?.age ?? '',
+      gender: currentAuthUser?.gender ?? '',
+      avatarUrl: currentAuthUser?.avatar_url || null,
+    };
+    if (formFields.displayName) {
+      formFields.displayName.value = profileSnapshot.nickname;
+    }
+    if (formFields.age) {
+      formFields.age.value = profileSnapshot.age ?? '';
+    }
+    if (formFields.gender) {
+      formFields.gender.value = profileSnapshot.gender ?? '';
+    }
+     renderAvatar(profileSnapshot.avatarUrl);
+     updateProfileViewState();
+     reflectProfileState();
+  };
+
+  const renderAvatar = (url) => {
+    if (!avatarPreview) {
+      return;
+    }
+    if (url && avatarImg) {
+      avatarImg.src = url;
+      avatarImg.hidden = false;
+      avatarPlaceholder?.setAttribute('hidden', 'true');
+    } else if (avatarImg) {
+      avatarImg.hidden = true;
+      avatarPlaceholder?.removeAttribute('hidden');
+    }
+  };
+
+  const reflectProfileState = () => {
+     profileSection.dataset.profileMode = profileMode;
+    const isEdit = profileMode === 'edit';
+     const isView = !isEdit;
+    editToggleBtn?.setAttribute('aria-pressed', String(isEdit));
+    if (editToggleBtn) {
+      editToggleBtn.innerHTML = isEdit ? 'Вернуться к просмотру' : 'Редактировать профиль';
+    }
+    if (saveBtn) {
+      saveBtn.disabled = !isEdit;
+      saveBtn.setAttribute('aria-disabled', String(!isEdit));
+    }
+    if (cancelBtn) {
+      cancelBtn.disabled = !isEdit;
+      cancelBtn.setAttribute('aria-disabled', String(!isEdit));
+    }
+    profileSection.classList.toggle('user-panel--editing', isEdit);
+
+     const collapse = document.querySelector('.password-collapse');
+    if (collapse) {
+      collapse.dataset.passwordState = passwordState;
+      const expanded = passwordState === 'expanded';
+      if (passwordForm) {
+        passwordForm.hidden = !expanded;
+        if (!expanded) {
+          passwordForm.reset();
+        }
+      }
+      passwordToggleBtn?.setAttribute('aria-expanded', String(expanded));
+      passwordToggleBtn?.setAttribute('aria-pressed', String(expanded));
+    }
+  };
+
+  const setProfileMode = (mode) => {
+    profileMode = mode;
+    const isEdit = mode === 'edit';
+    reflectProfileState();
+    if (!isEdit) {
+      syncProfileSnapshot();
+      setPasswordState('collapsed');
+    }
+  };
+
+  resetProfileToViewMode = () => setProfileMode('view');
+
+  const setPasswordState = (state) => {
+    passwordState = state;
+    reflectProfileState();
+  };
+
+  const showToastMessage = (message) => {
+    if (!message) {
+      return;
+    }
+    showUserToast(message);
+  };
+
+  const updateUserState = (payload, message) => {
+    if (!payload) {
+      return;
+    }
+    const userData = payload.user || payload;
+    currentAuthUser = userData;
+    renderAuthState(message || 'Профиль обновлён.');
+    setAuthToggleAvatar(userData?.avatar_url || null);
+    document.dispatchEvent(new CustomEvent('profile:user-updated', { detail: { user: userData } }));
+    refreshMarkers();
+  };
+
+    const submitProfileForm = () => {
+      if (!isAuthenticated()) {
+        showToastMessage('Нужно войти в аккаунт.');
+        return;
+      }
+      const nicknameInputValue = formFields.displayName?.value?.trim() || currentAuthUser?.nickname || '';
+      const payload = {
+        nickname: nicknameInputValue,
+        age: formFields.age?.value ?? null,
+        gender: formFields.gender?.value ?? null,
+      };
+      fetch('/profile', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify(payload),
+      })
+        .then(handleJsonResponse)
+        .then((response) => {
+          updateUserState(response, 'Профиль обновлён.');
+          setProfileMode('view');
+        })
+        .catch((error) => {
+          showToastMessage(error.message || 'Не удалось сохранить профиль.');
+        });
+    };
+
+    const submitPasswordForm = () => {
+      if (!passwordForm) {
+        return;
+      }
+      const formData = new FormData(passwordForm);
+      const currentPassword = formData.get('current_password');
+      const newPassword = formData.get('new_password');
+      const newPasswordConfirm = formData.get('new_password_confirm');
+      if (!currentPassword || !newPassword || !newPasswordConfirm) {
+        showToastMessage('Все поля пароля должны быть заполнены.');
+        return;
+      }
+      if (newPassword.length < 6) {
+        showToastMessage('Пароль должен быть не короче 6 символов.');
+        return;
+      }
+      if (newPassword !== newPasswordConfirm) {
+        showToastMessage('Новый пароль и его подтверждение не совпадают.');
+        return;
+      }
+      fetch('/profile/password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+      })
+        .then(handleJsonResponse)
+        .then(() => {
+          showToastMessage('Пароль обновлён.');
+          passwordForm.reset();
+          setPasswordState('collapsed');
+        })
+        .catch((error) => {
+          showToastMessage(error.message || 'Не удалось обновить пароль.');
+        });
+    };
+
+  const uploadAvatar = (file) => {
+    if (!file || !isAuthenticated()) {
+      return;
+    }
+    const formData = new FormData();
+    formData.append('avatar', file);
+    fetch('/profile/avatar', {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: formData,
+    })
+      .then(handleJsonResponse)
+      .then((payload) => {
+        updateUserState(payload, 'Аватар обновлён.');
+      })
+      .catch((error) => {
+        showToastMessage(error.message || 'Не удалось загрузить аватар.');
+      })
+      .finally(() => {
+        if (avatarInput) {
+          avatarInput.value = '';
+        }
+      });
+  };
+
+  editToggleBtn?.addEventListener('click', () => {
+    const isEdit = profileSection.dataset.profileMode === 'edit';
+    setProfileMode(isEdit ? 'view' : 'edit');
+  });
+
+  profileForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    submitProfileForm();
+  });
+
+  cancelBtn?.addEventListener('click', () => {
+    setProfileMode('view');
+  });
+
+  passwordToggleBtn?.addEventListener('click', () => {
+      const currentState = document.querySelector('.password-collapse')?.dataset.passwordState || 'collapsed';
+      setPasswordState(currentState === 'collapsed' ? 'expanded' : 'collapsed');
+    });
+
+  passwordCancelBtn?.addEventListener('click', () => {
+    passwordForm?.reset();
+    setPasswordState('collapsed');
+  });
+
+  passwordForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    submitPasswordForm();
+  });
+
+  avatarUploadBtn?.addEventListener('click', () => {
+    avatarInput?.click();
+  });
+
+  avatarInput?.addEventListener('change', (event) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      uploadAvatar(file);
+    }
+  });
+
+  document.addEventListener('profile:auth-state-changed', (event) => {
+    const { authenticated, user } = event.detail || {};
+    if (!authenticated) {
+      setProfileMode('view');
+      setPasswordState('collapsed');
+    }
+    currentAuthUser = user || null;
+    syncProfileSnapshot();
+  });
+
+  syncProfileSnapshot();
+  setProfileMode('view');
 }
 
 function readAuthPayload(form) {
@@ -1235,9 +1670,11 @@ function initAuthWidget() {
   renderAuthState();
   updateAuthModeUI();
   setAuthPanelVisibility(false);
+  initProfileSettings();
 
   if (authToggleBtn) {
     authToggleBtn.addEventListener('click', () => {
+      ensureProfileViewMode();
       if (!authPanelVisible && getFilterPanelElement()?.classList.contains('collapsed')) {
         expandFilterPanel();
         setAuthPanelVisibility(true);
@@ -1280,6 +1717,10 @@ function initAuthWidget() {
           currentAuthUser = result.user;
           renderAuthState(successMessage);
           setAuthPanelVisibility(false);
+          const displayNameInput = document.querySelector('.user-panel__input[name="profile_display_name"]');
+          if (displayNameInput && currentAuthUser?.nickname) {
+            displayNameInput.value = currentAuthUser.nickname;
+          }
           refreshMarkers();
         })
         .catch((error) => {
@@ -1551,7 +1992,7 @@ function removePinFromMap(pinId) {
 
 function applyCategoryFilters() {
   activeMarkers.forEach(({ marker, pin }) => {
-    const shouldShow = showAllMode === SHOW_ALL_MODES.ALL || activeCategorySlugs.has(pin.category_slug);
+    const shouldShow = activeCategorySlugs.has(pin.category_slug);
     const isOnMap = map.hasLayer(marker);
     if (shouldShow && !isOnMap) {
       marker.addTo(map);
@@ -1570,6 +2011,7 @@ function isAnyExistingPinPopupOpen() {
 
 window.addEventListener('load', function () {
   initAuthWidget();
+  parseSharedPinTokenFromUrl();
 
   map = L.map('leaflet-map', {
     zoomControl: true,
@@ -1657,7 +2099,9 @@ window.addEventListener('load', function () {
   }
 
   map.on('click', function (e) {
+    logFilterPanelState('map-click-start', { lat: e?.latlng?.lat, lng: e?.latlng?.lng });
     if (window.currentCreationMarker) {
+      logFilterPanelState('map-click-with-existing-creation-marker');
       clearCreationMarker();
       restoreFilterPanelAfterCreation();
       return;
@@ -1689,44 +2133,42 @@ window.addEventListener('load', function () {
 
   categoryChips = Array.from(document.querySelectorAll('.category-chip'));
   categoryChips.forEach((chip) => {
-    chip.classList.remove('is-active');
-    chip.setAttribute('aria-pressed', 'false');
+    const slug = chip.dataset.categorySlug;
+    const isInitiallyActive = slug ? activeCategorySlugs.has(slug) : false;
+    chip.classList.toggle('is-active', isInitiallyActive);
+    chip.setAttribute('aria-pressed', String(isInitiallyActive));
     chip.addEventListener('click', () => {
-      const slug = chip.dataset.categorySlug;
       if (!slug) {
         return;
       }
-      const isActive = chip.classList.toggle('is-active');
-      chip.setAttribute('aria-pressed', String(isActive));
-      if (isActive) {
-        activeCategorySlugs.add(slug);
-      } else {
+      if (activeCategorySlugs.has(slug)) {
         activeCategorySlugs.delete(slug);
+      } else {
+        activeCategorySlugs.add(slug);
       }
-      applyCategoryFilters();
+      showAllMode = areAllCategoriesActive() ? SHOW_ALL_MODES.ALL : SHOW_ALL_MODES.OFF;
+      updateFiltersUi();
     });
   });
 
-  resetBtn.addEventListener('click', () => {
-    if (activeCategorySlugs.size === 0) {
-      return;
-    }
-    activeCategorySlugs.clear();
-    categoryChips.forEach((chip) => {
-      chip.classList.remove('is-active');
-      chip.setAttribute('aria-pressed', 'false');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+      if (activeCategorySlugs.size === 0) {
+        return;
+      }
+      deactivateAllCategories();
+      showAllMode = SHOW_ALL_MODES.OFF;
+      updateFiltersUi();
     });
-    applyCategoryFilters();
-  });
+  }
 
   showAllBtn = document.getElementById('show-all-btn');
   if (showAllBtn) {
     showAllBtn.addEventListener('click', (event) => {
       event.preventDefault();
-      const nextMode = showAllMode === SHOW_ALL_MODES.ALL ? SHOW_ALL_MODES.OFF : SHOW_ALL_MODES.ALL;
-      setShowAllMode(nextMode);
+      setShowAllMode();
     });
-    updateShowAllButtonAppearance();
+    updateFiltersUi();
   }
 
   refreshBtn = document.getElementById('refresh-btn');
@@ -1811,6 +2253,15 @@ document.addEventListener('click', function (e) {
     if (pinId && commentId) {
       handleDeleteComment(pinId, commentId);
     }
+  }
+
+  const filterCategoryChip = e.target.closest('.category-chip');
+  if (filterCategoryChip) {
+    const panel = getFilterPanelElement();
+    logFilterPanelState('category-chip-click', {
+      chipSlug: filterCategoryChip.dataset.categorySlug || null,
+      panelHasMinimizedClass: panel ? panel.classList.contains('minimized') : false,
+    });
   }
 });
 
@@ -1942,17 +2393,20 @@ function expandFilterPanel() {
 
 function collapseFilterPanelAnimated() {
   const panel = getFilterPanelElement();
-  if (!panel) {
+  if (!panel || panel.classList.contains('collapsed')) {
     return;
   }
-  if (panel.classList.contains('collapsed')) {
-    return;
-  }
+  ensureProfileViewMode();
   panel.classList.add('collapsing');
-  const handleTransitionEnd = () => {
+  const handleTransitionEnd = (event) => {
+    if (event.target !== panel) {
+      return;
+    }
     panel.classList.remove('collapsing');
     panel.removeEventListener('transitionend', handleTransitionEnd);
   };
   panel.addEventListener('transitionend', handleTransitionEnd);
-  panel.classList.add('collapsed');
+  requestAnimationFrame(() => {
+    panel.classList.add('collapsed');
+  });
 }

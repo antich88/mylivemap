@@ -7,3 +7,6 @@ venv/
 data/*.db
 data/pins.json
 data/users.json
+data/profiles.json
+static/uploads/
+data/profiles.json

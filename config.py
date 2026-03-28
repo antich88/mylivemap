@@ -5,9 +5,11 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-DB_DIR = PROJECT_ROOT / "data"
-DB_DIR.mkdir(exist_ok=True)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = Path(BASE_DIR)
+DB_DIR_PATH = os.path.join(BASE_DIR, "data")
+os.makedirs(DB_DIR_PATH, exist_ok=True)
+DB_DIR = Path(DB_DIR_PATH)
 DATABASE_PATH = DB_DIR / "live_map.db"
 DATABASE_KEY = os.environ.get("LIVE_MAP_DB_KEY", "dev-live-map-key")
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key-change-me")
@@ -15,6 +17,15 @@ DEFAULT_SQLITE_URL = f"sqlite:///{DATABASE_PATH}"
 DATABASE_URL = os.environ.get("DATABASE_URL", DEFAULT_SQLITE_URL)
 LOCAL_PINS_PATH = DB_DIR / "pins.json"
 LOCAL_USERS_PATH = DB_DIR / "users.json"
+LOCAL_PROFILES_PATH = DB_DIR / "profiles.json"
+
+STATIC_DIR = PROJECT_ROOT / "static"
+UPLOADS_DIR = STATIC_DIR / "uploads"
+AVATAR_UPLOAD_DIR = UPLOADS_DIR / "avatars"
+AVATAR_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+MAX_AVATAR_FILE_SIZE = int(os.environ.get("MAX_AVATAR_FILE_SIZE", 1_048_576))
+ALLOWED_AVATAR_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 
 MAP_DEFAULTS = {
     "zoom": 13,
