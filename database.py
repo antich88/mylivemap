@@ -57,6 +57,7 @@ if LOCAL_MODE:
     pins_table = None  # type: ignore
     users_table = None  # type: ignore
     profiles_table = None  # type: ignore
+    votes_table = None  # type: ignore
 
 else:
     from sqlalchemy import (
@@ -147,6 +148,18 @@ else:
         Column("avatar_path", String(512)),
         Column("created_at", DateTime(timezone=True), nullable=False),
         Column("updated_at", DateTime(timezone=True), nullable=False),
+    )
+
+    votes_table = Table(
+        "votes",
+        metadata,
+        Column("id", Integer, primary_key=True),
+        Column("pin_id", Integer, ForeignKey("pins.id", ondelete="CASCADE"), nullable=False),
+        Column("user_id", String(255), nullable=False),
+        Column("vote_value", Integer, nullable=False),
+        Column("created_at", DateTime(timezone=True), nullable=False),
+        Column("updated_at", DateTime(timezone=True), nullable=False),
+        UniqueConstraint("pin_id", "user_id", name="uq_votes_pin_user"),
     )
 
 

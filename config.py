@@ -4,15 +4,24 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - optional dev dependency
+    load_dotenv = None  # type: ignore[assignment]
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = Path(BASE_DIR)
+if load_dotenv:
+    load_dotenv(dotenv_path=PROJECT_ROOT / ".env", override=False)
 DB_DIR_PATH = os.path.join(BASE_DIR, "data")
 os.makedirs(DB_DIR_PATH, exist_ok=True)
 DB_DIR = Path(DB_DIR_PATH)
-DATABASE_PATH = DB_DIR / "live_map.db"
-DATABASE_KEY = os.environ.get("LIVE_MAP_DB_KEY", "dev-live-map-key")
-SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key-change-me")
+DATABASE_PATH = Path(BASE_DIR) / "database.db"
+DATABASE_KEY = os.getenv("LIVE_MAP_DB_KEY", "dev-live-map-key")
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY must be set via environment variable")
 DEFAULT_SQLITE_URL = f"sqlite:///{DATABASE_PATH}"
 DATABASE_URL = os.environ.get("DATABASE_URL", DEFAULT_SQLITE_URL)
 LOCAL_PINS_PATH = DB_DIR / "pins.json"
@@ -26,6 +35,21 @@ AVATAR_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_AVATAR_FILE_SIZE = int(os.environ.get("MAX_AVATAR_FILE_SIZE", 1_048_576))
 ALLOWED_AVATAR_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+_raw_cloudinary_url = (os.getenv("CLOUDINARY_URL") or "").strip()
+CLOUDINARY_URL = _raw_cloudinary_url or None
+CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
+CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
+CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
+CLOUDINARY_AVATAR_FOLDER = os.getenv("CLOUDINARY_AVATAR_FOLDER", "live_map/avatars")
+CLOUDINARY_STORAGE_PREFIX = "cloudinary:"
+
+CLOUDINARY_CREDENTIALS = {
+    "cloud_name": CLOUDINARY_CLOUD_NAME,
+    "api_key": CLOUDINARY_API_KEY,
+    "api_secret": CLOUDINARY_API_SECRET,
+}
+CLOUDINARY_HAS_BASIC_CREDS = all(CLOUDINARY_CREDENTIALS.values())
+CLOUDINARY_ENABLED = bool(CLOUDINARY_URL or CLOUDINARY_HAS_BASIC_CREDS)
 
 MAP_DEFAULTS = {
     "zoom": 13,

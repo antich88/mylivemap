@@ -354,6 +354,94 @@ header.filter-panel.minimized .category-chip {
 .user-panel__content.is-visible {
   display: grid;
 }
+
+.user-panel__active-pins {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.user-panel__active-pins-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.user-panel__active-pins-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.user-panel__active-pins-count {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.user-panel__active-pins-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.user-panel__active-pin {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.85rem;
+  padding: 0.75rem 1rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.user-panel__active-pin-title {
+  font-weight: 600;
+  margin: 0;
+  color: #ffffff;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(90, 135, 255, 0.6);
+  text-underline-offset: 4px;
+}
+
+.user-panel__active-pin-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.user-panel__active-pin-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.user-panel__delete-pin-btn {
+  border-radius: 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 0.35rem 0.9rem;
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.user-panel__delete-pin-btn:hover,
+.user-panel__delete-pin-btn:focus-visible {
+  transform: translateY(-1px);
+  background: rgba(255, 0, 0, 0.1);
+}
+
+.user-panel__active-pins-empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.5);
+}
 .profile-actions--sticky {
   position: sticky;
   bottom: calc(env(safe-area-inset-bottom, 12px) + 1rem);
@@ -822,6 +910,59 @@ header.filter-panel.minimized .category-chip {
   font-size: 0.9rem;
 }
 
+.pin-popup__author {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.85rem;
+  background: rgba(90, 135, 255, 0.08);
+  margin-bottom: 0.45rem;
+}
+
+.pin-popup__author-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid rgba(90, 135, 255, 0.4);
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(90, 135, 255, 0.15);
+}
+
+.pin-popup__author-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pin-popup__author-avatar-placeholder {
+  font-size: 1rem;
+  color: #0b1b43;
+  font-weight: 600;
+}
+
+.pin-popup__author-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.pin-popup__author-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: rgba(12, 15, 33, 0.6);
+}
+
+.pin-popup__author-nickname {
+  font-weight: 700;
+  color: #0b1b43;
+}
+
 .pin-popup strong {
   color: #111;
   display: block;
@@ -842,6 +983,45 @@ header.filter-panel.minimized .category-chip {
   color: #5d6280;
   margin-bottom: 0.35rem;
   flex-wrap: wrap;
+}
+
+.pin-popup__vote-controls {
+  display: flex;
+  gap: 0.3rem;
+  margin-bottom: 0.4rem;
+}
+
+.pin-vote-btn {
+  flex: 1;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.95);
+  color: #1f1f1f;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.35rem 0;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.pin-vote-btn--up[aria-pressed="true"],
+.pin-vote-btn--down[aria-pressed="true"] {
+  background: rgba(90, 135, 255, 0.2);
+  border-color: rgba(90, 135, 255, 0.6);
+}
+
+.pin-vote-btn--up.pin-vote-btn--active {
+  border-color: #1db954;
+  box-shadow: 0 0 0 2px rgba(29, 185, 84, 0.15);
+}
+
+.pin-vote-btn--down.pin-vote-btn--active {
+  border-color: #ff4d4f;
+  box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.18);
+}
+
+.pin-vote-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: rgba(90, 135, 255, 0.1);
 }
 
 .pin-popup__ttl {
@@ -1294,6 +1474,36 @@ header.filter-panel.minimized .category-chip {
   align-items: flex-start;
   line-height: 1.2;
   min-width: 0;
+}
+
+.user-panel__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.user-panel__rating-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 0.35rem 0.75rem;
+  border-radius: 0.85rem;
+  background: linear-gradient(135deg, rgba(90, 135, 255, 0.25), rgba(255, 255, 255, 0.08));
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 20px 35px rgba(3, 4, 12, 0.35);
+}
+
+.user-panel__rating-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.user-panel__rating-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #ffffff;
 }
 
 .user-panel--guest .user-panel__eyebrow {

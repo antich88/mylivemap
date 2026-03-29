@@ -3,16 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone, timedelta
 import json
+import logging
 import secrets
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import uuid4
 
 from config import CATEGORY_DEFINITIONS, LOCAL_PINS_PATH, is_local_mode, ttl_for
-from database import LocalPinStore, pins_table, session_scope
+from database import LocalPinStore, pins_table, session_scope, votes_table
 
 
 LOCAL_MODE = is_local_mode()
 _LOCAL_STORE = LocalPinStore(LOCAL_PINS_PATH) if LOCAL_MODE else None
+logger = logging.getLogger(__name__)
 
 
 def _coerce_dt(value):
@@ -36,6 +38,51 @@ def _parse_metadata(raw: Any) -> Dict[str, Any]:
     if isinstance(raw, dict):
         return dict(raw)
     return {}
+
+
+def _normalize_votes(raw_votes: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw_votes, list):
+        return []
+    normalized: List[Dict[str, Any]] = []
+    for entry in raw_votes:
+        if not isinstance(entry, dict):
+            continue
+        vote_value = _coerce_vote_value(entry.get("vote_value"))
+        if vote_value == 0:
+            continue
+        normalized.append(
+            {
+                "user_id": str(entry.get("user_id") or "").strip(),
+                "vote_value": vote_value,
+                "created_at": str(entry.get("created_at") or ""),
+                "updated_at": str(entry.get("updated_at") or ""),
+            }
+        )
+    return normalized
+
+
+def _ensure_votes_container(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    payload = dict(metadata or {})
+    votes = payload.get("votes")
+    if not isinstance(votes, list):
+        payload["votes"] = []
+    else:
+        payload["votes"] = _normalize_votes(votes)
+    return payload
+
+
+def _ensure_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    payload = _ensure_comments_container(metadata)
+    payload = _ensure_votes_container(payload)
+    return payload
+
+
+def _coerce_vote_value(value: Any) -> int:
+    try:
+        vote = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return vote if vote in (-1, 1) else 0
 
 
 def _make_comment_entry(user_id: str, text: str) -> Dict[str, str]:
@@ -137,6 +184,47 @@ def _ensure_comments_container(metadata: Optional[Dict[str, Any]]) -> Dict[str, 
         payload["comments"] = []
     else:
         payload["comments"] = _normalize_comments(comments)
+    return payload
+
+
+def _normalize_votes(raw_votes: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw_votes, list):
+        return []
+    normalized: List[Dict[str, Any]] = []
+    for entry in raw_votes:
+        if not isinstance(entry, dict):
+            continue
+        vote_value = entry.get("vote_value")
+        try:
+            vote_value = int(vote_value)
+        except (TypeError, ValueError):
+            vote_value = 0
+        if vote_value not in (-1, 1):
+            continue
+        normalized.append(
+            {
+                "user_id": str(entry.get("user_id") or "").strip(),
+                "vote_value": vote_value,
+                "created_at": str(entry.get("created_at") or ""),
+                "updated_at": str(entry.get("updated_at") or ""),
+            }
+        )
+    return normalized
+
+
+def _ensure_votes_container(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    payload = dict(metadata or {})
+    votes = payload.get("votes")
+    if not isinstance(votes, list):
+        payload["votes"] = []
+    else:
+        payload["votes"] = _normalize_votes(votes)
+    return payload
+
+
+def _ensure_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    payload = _ensure_comments_container(metadata)
+    payload = _ensure_votes_container(payload)
     return payload
 
 
@@ -262,7 +350,7 @@ def _mapping_to_pin(row: Mapping[str, Any]) -> Pin:
         created_at=created_at,
         expires_at=_coerce_dt(row.get("expires_at")),
         rating=int(row.get("rating", 0)),
-        metadata=_ensure_comments_container(metadata_payload),
+        metadata=_ensure_metadata(metadata_payload),
         shared_token=row.get("shared_token"),
         user_id=str(row.get("user_id") or ""),
     )
@@ -277,7 +365,7 @@ def _serialize_local_record(record: Dict[str, Any]) -> Dict[str, Any]:
     payload = dict(record)
     created_at = payload.get("created_at")
     expires_at = payload.get("expires_at")
-    payload["metadata"] = _ensure_comments_container(payload.get("metadata") or {})
+    payload["metadata"] = _ensure_metadata(payload.get("metadata") or {})
     if isinstance(created_at, datetime):
         payload["created_at"] = created_at.isoformat()
     if isinstance(expires_at, datetime):
@@ -301,7 +389,7 @@ def create_pin(
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(seconds=ttl) if ttl else None
     token = secrets.token_urlsafe(12)
-    payload = _ensure_comments_container(metadata)
+    payload = _ensure_metadata(metadata)
 
     print(f"create_pin: {category=} {category_slug=} {subcategory_slug=} {nickname=} {lat=} {lng=}")
 
@@ -458,6 +546,36 @@ def get_pin_owner(pin_id: int) -> Optional[str]:
     return row
 
 
+def get_user_rating_total(user_id: str) -> int:
+    if not user_id:
+        return 0
+    now_iso = datetime.now(timezone.utc)
+
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        total = 0
+        for record in snapshot.get("pins", []):
+            if str(record.get("user_id") or "") != user_id:
+                continue
+            if not _pin_is_active(record, now_iso):
+                continue
+            total += int(record.get("rating", 0))
+        return total
+
+    from sqlalchemy import func, select
+
+    with session_scope() as session:
+        stmt = (
+            select(func.coalesce(func.sum(pins_table.c.rating), 0))
+            .where(
+                pins_table.c.user_id == user_id,
+                (pins_table.c.expires_at.is_(None) | (pins_table.c.expires_at > now_iso)),
+            )
+        )
+        result = session.execute(stmt).scalar()
+    return int(result or 0)
+
+
 def adjust_rating(pin_id: int, delta: int = 1) -> Optional[int]:
     if LOCAL_MODE:
         snapshot = _LOCAL_STORE.snapshot()
@@ -485,6 +603,183 @@ def adjust_rating(pin_id: int, delta: int = 1) -> Optional[int]:
         result = session.execute(stmt).scalar_one_or_none()
     return result
 
+
+def record_vote(pin_id: int, user_id: str, vote_value: int) -> Optional[dict]:
+    vote_value = _coerce_vote_value(vote_value)
+    now = datetime.now(timezone.utc)
+
+    if not user_id:
+        raise ValueError("Нужен идентификатор пользователя для голосования.")
+
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        pins = list(snapshot.get("pins", []))
+        for idx, record in enumerate(pins):
+            if int(record.get("id", 0)) != pin_id:
+                continue
+            if not _pin_is_active(record, now):
+                return None
+            metadata = _ensure_votes_container(record.get("metadata") or {})
+            votes = metadata["votes"]
+            existing = next((entry for entry in votes if entry.get("user_id") == user_id), None)
+            previous_value = int(existing.get("vote_value", 0)) if existing else 0
+            delta = 0
+            if vote_value == 0:
+                if existing:
+                    delta = -previous_value
+                    votes.remove(existing)
+                else:
+                    delta = 0
+            else:
+                if existing:
+                    if previous_value == vote_value:
+                        delta = 0
+                    else:
+                        delta = vote_value - previous_value
+                        existing["vote_value"] = vote_value
+                        existing["updated_at"] = now.isoformat()
+                else:
+                    delta = vote_value
+                    votes.append(
+                        {
+                            "user_id": user_id,
+                            "vote_value": vote_value,
+                            "created_at": now.isoformat(),
+                            "updated_at": now.isoformat(),
+                        }
+                    )
+            record["metadata"] = metadata
+            record["rating"] = int(record.get("rating", 0)) + delta
+            snapshot["pins"][idx] = _serialize_local_record(record)  # type: ignore[index]
+            snapshot["pins"] = snapshot["pins"]
+            _LOCAL_STORE.persist(snapshot)
+            pin_owner = str(record.get("user_id") or "")
+            profile_rating = get_user_rating_total(pin_owner)
+            logger.debug(
+                "record_vote (local): pin=%s user=%s prev=%s new=%s delta=%s profile_rating=%s",
+                pin_id,
+                user_id,
+                previous_value,
+                vote_value,
+                delta,
+                profile_rating,
+            )
+            return {
+                "pin_rating": int(record.get("rating", 0)),
+                "vote_value": vote_value,
+                "profile_rating": profile_rating,
+            }
+        return None
+
+    from sqlalchemy import delete, insert, select, update
+
+    with session_scope() as session:
+        stmt = select(pins_table.c.rating, pins_table.c.user_id, pins_table.c.expires_at).where(pins_table.c.id == pin_id)
+        pin_row = session.execute(stmt).mappings().first()
+        if not pin_row:
+            return None
+        expires_at = _coerce_dt(pin_row.get("expires_at"))
+        if expires_at and expires_at <= now:
+            return None
+        owner = str(pin_row.get("user_id") or "")
+
+        vote_stmt = (
+            select(votes_table.c.id, votes_table.c.vote_value)
+            .where(votes_table.c.pin_id == pin_id, votes_table.c.user_id == user_id)
+            .limit(1)
+        )
+        vote_row = session.execute(vote_stmt).mappings().first()
+        previous_value = int(vote_row.get("vote_value", 0)) if vote_row else 0
+        delta = 0
+        if vote_value == 0:
+            if vote_row:
+                delete_stmt = delete(votes_table).where(votes_table.c.pin_id == pin_id, votes_table.c.user_id == user_id)
+                session.execute(delete_stmt)
+                delta = -previous_value
+        else:
+            if vote_row:
+                if previous_value != vote_value:
+                    update_stmt = (
+                        update(votes_table)
+                        .where(votes_table.c.id == vote_row.get("id"))
+                        .values(vote_value=vote_value, updated_at=now)
+                    )
+                    session.execute(update_stmt)
+                    delta = vote_value - previous_value
+            else:
+                insert_stmt = insert(votes_table).values(
+                    pin_id=pin_id,
+                    user_id=user_id,
+                    vote_value=vote_value,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.execute(insert_stmt)
+                delta = vote_value
+        pin_update_delta = delta
+        if pin_update_delta:
+            update_pin = (
+                update(pins_table)
+                .where(pins_table.c.id == pin_id)
+                .values(rating=pins_table.c.rating + pin_update_delta)
+            )
+            session.execute(update_pin)
+
+        rating_stmt = select(pins_table.c.rating).where(pins_table.c.id == pin_id)
+        updated_rating = session.execute(rating_stmt).scalar_one_or_none()
+        profile_rating = get_user_rating_total(owner)
+        logger.debug(
+            "record_vote: pin=%s user=%s prev=%s new=%s delta=%s profile_rating=%s",
+            pin_id,
+            user_id,
+            previous_value,
+            vote_value,
+            delta,
+            profile_rating,
+        )
+        return {
+            "pin_rating": int(updated_rating or 0),
+            "vote_value": vote_value,
+            "profile_rating": profile_rating,
+        }
+
+
+def user_votes_for_pins(user_id: str, pin_ids: Sequence[int]) -> Dict[int, int]:
+    if not user_id or not pin_ids:
+        return {}
+    target_ids = {int(pid) for pid in pin_ids if isinstance(pid, int) and pid > 0}
+    if not target_ids:
+        return {}
+
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        votes: Dict[int, int] = {}
+        for record in snapshot.get("pins", []):
+            try:
+                pin_id_value = int(record.get("id", 0))
+            except (TypeError, ValueError):
+                continue
+            if pin_id_value not in target_ids:
+                continue
+            metadata = _ensure_votes_container(record.get("metadata") or {})
+            for entry in metadata.get("votes", []):
+                if entry.get("user_id") == user_id:
+                    votes[pin_id_value] = int(entry.get("vote_value", 0))
+                    break
+        return votes
+
+    from sqlalchemy import select
+
+    with session_scope() as session:
+        stmt = (
+            select(votes_table.c.pin_id, votes_table.c.vote_value)
+            .where(
+                votes_table.c.user_id == user_id,
+                votes_table.c.pin_id.in_(tuple(target_ids)),
+            )
+        )
+        rows = session.execute(stmt).mappings().all()
+    return {int(row["pin_id"]): int(row["vote_value"]) for row in rows}
 
 def cleanup_expired() -> int:
     now_iso = datetime.now(timezone.utc)

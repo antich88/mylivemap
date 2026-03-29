@@ -3,10 +3,20 @@ from __future__ import annotations
 import json
 import os
 import secrets
+from pathlib import Path
+from typing import BinaryIO
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.utils import secure_filename
 
+try:
+    import cloudinary
+    from cloudinary import uploader as cloudinary_uploader
+    from cloudinary.utils import cloudinary_url as cloudinary_url_for
+except ImportError:  # pragma: no cover - optional dependency
+    cloudinary = None
+    cloudinary_uploader = None
+    cloudinary_url_for = None
 from auth_store import (
     NicknameAlreadyExistsError,
     create_user,
@@ -23,6 +33,13 @@ from config import (
     ALLOWED_AVATAR_EXTENSIONS,
     AVATAR_UPLOAD_DIR,
     CATEGORY_DEFINITIONS,
+    CLOUDINARY_API_KEY,
+    CLOUDINARY_API_SECRET,
+    CLOUDINARY_AVATAR_FOLDER,
+    CLOUDINARY_CLOUD_NAME,
+    CLOUDINARY_ENABLED,
+    CLOUDINARY_STORAGE_PREFIX,
+    CLOUDINARY_URL,
     MAP_DEFAULTS,
     MAX_AVATAR_FILE_SIZE,
     SECRET_KEY,
@@ -32,14 +49,16 @@ from database import ensure_connection, init_schema
 from models import (
     active_pins,
     add_comment,
-    adjust_rating,
     count_active_pins_for_user,
     create_pin,
     delete_comment,
     delete_pin,
     get_pin_by_id,
     get_pin_owner,
+    get_user_rating_total,
+    record_vote,
     reassign_user_id,
+    user_votes_for_pins,
 )
 
 USER_MARKER_LIMIT = 5
@@ -51,6 +70,29 @@ USER_LIMIT_MESSAGE = (
 def create_app() -> Flask:
     app = Flask(__name__, static_folder="static", template_folder="templates")
     app.secret_key = SECRET_KEY
+
+    cloudinary_url = os.getenv("CLOUDINARY_URL") or CLOUDINARY_URL
+    cloudinary_creds = {
+        "cloud_name": os.getenv("CLOUDINARY_CLOUD_NAME") or CLOUDINARY_CLOUD_NAME,
+        "api_key": os.getenv("CLOUDINARY_API_KEY") or CLOUDINARY_API_KEY,
+        "api_secret": os.getenv("CLOUDINARY_API_SECRET") or CLOUDINARY_API_SECRET,
+    }
+    has_creds = all(cloudinary_creds.values())
+
+    if CLOUDINARY_ENABLED and cloudinary:
+        try:
+            if cloudinary_url:
+                cloudinary.config(cloudinary_url=cloudinary_url, secure=True)
+            elif has_creds:
+                cloudinary.config(secure=True, **cloudinary_creds)
+            else:
+                raise RuntimeError("Cloudinary credentials are not configured")
+            app.logger.info("Cloudinary storage is enabled for avatars")
+        except Exception as exc:  # pragma: no cover - optional external service
+            app.logger.warning(
+                "Failed to configure Cloudinary, fallback to local uploads: %s",
+                exc,
+            )
 
     def _ensure_avatar_upload_dir() -> None:
         try:
@@ -86,11 +128,16 @@ def create_app() -> Flask:
             age_value = None
         gender_value = profile.get("gender") or None
         avatar_filename = profile.get("avatar_path")
-        avatar_url = (
-            url_for("static", filename=f"uploads/avatars/{avatar_filename}")
-            if avatar_filename
-            else None
-        )
+        avatar_url = None
+        if avatar_filename:
+            if isinstance(avatar_filename, str) and avatar_filename.startswith(("http://", "https://")):
+                avatar_url = avatar_filename
+            elif avatar_filename.startswith(CLOUDINARY_STORAGE_PREFIX):
+                if cloudinary_url_for:
+                    public_id = avatar_filename.split(CLOUDINARY_STORAGE_PREFIX, 1)[-1]
+                    avatar_url = cloudinary_url_for(public_id, secure=True)[0]
+            else:
+                avatar_url = url_for("static", filename=f"uploads/avatars/{avatar_filename}")
         return {
             "nickname": profile.get("nickname"),
             "age": age_value,
@@ -103,6 +150,7 @@ def create_app() -> Flask:
 
     def _build_user_state(nickname: str) -> dict:
         base = {"nickname": nickname, "age": None, "gender": None, "avatar_url": None}
+        base["rating_total"] = get_user_rating_total(nickname)
         try:
             profile = get_or_create_user_profile(nickname)
         except Exception as exc:  # pragma: no cover
@@ -133,8 +181,53 @@ def create_app() -> Flask:
             return None
         return _build_user_state(user.nickname)
 
+    def _is_cloudinary_avatar(path: str | None) -> bool:
+        return bool(path and path.startswith(CLOUDINARY_STORAGE_PREFIX))
+
+    def _cloudinary_public_id(path: str) -> str:
+        return path.split(CLOUDINARY_STORAGE_PREFIX, 1)[-1]
+
+    def _upload_to_cloudinary(source: Path | BinaryIO, unique_name: str) -> str | None:
+        if not (CLOUDINARY_ENABLED and cloudinary_uploader):
+            return None
+        public_id = unique_name.rsplit(".", 1)[0]
+        try:
+            upload_source = str(source) if isinstance(source, Path) else source
+            if not isinstance(upload_source, str):
+                upload_source.seek(0)
+            upload_result = cloudinary_uploader.upload(
+                upload_source,
+                public_id=public_id,
+                folder=CLOUDINARY_AVATAR_FOLDER,
+                resource_type="image",
+                overwrite=True,
+                use_filename=False,
+                unique_filename=False,
+            )
+            secure_url = str(upload_result.get("secure_url") or "").strip()
+            print(f"DEBUG CLOUDINARY SUCCESS: {secure_url}")
+            if secure_url:
+                return secure_url
+            print("DEBUG CLOUDINARY WARNING: secure_url отсутствует, отклоняем запись")
+            return None
+        except Exception as exc:  # pragma: no cover
+            print(f"DEBUG CLOUDINARY ERROR: {exc}")
+            app.logger.warning("Cloudinary upload failed for %s: %s", unique_name, exc)
+            return None
+
     def _delete_avatar_file(filename: str | None) -> None:
         if not filename:
+            return
+        if isinstance(filename, str) and filename.startswith(("http://", "https://")):
+            return
+        if _is_cloudinary_avatar(filename):
+            if not cloudinary_uploader:
+                return
+            public_id = _cloudinary_public_id(filename)
+            try:
+                cloudinary_uploader.destroy(public_id, invalidate=True, resource_type="image")
+            except Exception as exc:  # pragma: no cover
+                app.logger.warning("Failed to delete Cloudinary avatar %s: %s", public_id, exc)
             return
         target_path = AVATAR_UPLOAD_DIR / filename
         try:
@@ -372,13 +465,24 @@ def create_app() -> Flask:
             return {"message": "Файл слишком большой."}, 400
         unique_prefix = secrets.token_urlsafe(8)
         unique_name = f"{current_user['nickname']}-{unique_prefix}.{ext}"
-        target_path = AVATAR_UPLOAD_DIR / unique_name
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        file.save(target_path)
+        cloudinary_tagged = None
+        cloudinary_available = CLOUDINARY_ENABLED and cloudinary_uploader
+        if cloudinary_available:
+            file.stream.seek(0)
+            print("--- ATTEMPTING CLOUDINARY UPLOAD ---")
+            cloudinary_tagged = _upload_to_cloudinary(file.stream, unique_name)
+            if not cloudinary_tagged:
+                return {"message": "Не удалось загрузить аватар в Cloudinary."}, 500
+        else:
+            target_path = AVATAR_UPLOAD_DIR / unique_name
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            file.stream.seek(0)
+            file.save(target_path)
         profile = get_or_create_user_profile(current_user["nickname"])
         previous_avatar = profile.get("avatar_path")
-        profile = update_user_avatar_path(current_user["nickname"], unique_name)
-        if previous_avatar and previous_avatar != unique_name:
+        next_avatar_path = cloudinary_tagged or unique_name
+        profile = update_user_avatar_path(current_user["nickname"], next_avatar_path)
+        if previous_avatar and previous_avatar != next_avatar_path:
             _delete_avatar_file(previous_avatar)
         user_state = _build_user_state(current_user["nickname"])
         return {"user": user_state, "profile": _serialize_profile(profile)}, 200
@@ -408,7 +512,24 @@ def create_app() -> Flask:
             threshold = request.args.get("rating", default=-999, type=int)
             allowed = categories.split(",") if categories else None
             pins = active_pins(allowed_subcategories=allowed, rating_threshold=threshold)
-            return jsonify([pin.to_dict() for pin in pins])
+            authors_cache: dict[str, dict] = {}
+            response_payload = []
+            for pin in pins:
+                payload = pin.to_dict()
+                user_id = pin.user_id
+                if user_id:
+                    author = authors_cache.get(user_id)
+                    if author is None:
+                        author = _build_user_state(user_id)
+                        authors_cache[user_id] = author
+                    payload["author"] = {
+                        "nickname": author.get("nickname") or user_id,
+                        "avatar_url": author.get("avatar_url"),
+                    }
+                else:
+                    payload["author"] = None
+                response_payload.append(payload)
+            return jsonify(response_payload)
 
         payload = request.get_json()
         if not payload:
@@ -518,11 +639,43 @@ def create_app() -> Flask:
 
     @app.route("/api/pins/<int:pin_id>/vote", methods=["POST"])
     def vote(pin_id: int) -> tuple[dict, int]:
-        delta = request.json.get("delta", 1)
-        rating = adjust_rating(pin_id, delta)
-        if rating is None:
+        user = current_user_payload()
+        if not user:
+            app.logger.debug("vote denied: unauthenticated request for pin_id=%s", pin_id)
+            return {"message": "Нужно войти в аккаунт чтобы голосовать."}, 401
+        payload = request.get_json(silent=True) or {}
+        def parse_vote(value) -> int | None:
+            try:
+                candidate = int(value)
+            except (TypeError, ValueError):
+                return None
+            return candidate if candidate in (-1, 0, 1) else None
+        vote_value = parse_vote(payload.get("vote"))
+        if vote_value is None:
+            vote_value = parse_vote(payload.get("delta"))
+        if vote_value is None:
+            vote_value = 1
+        result = record_vote(pin_id, user["nickname"], vote_value)
+        if not result:
             abort(404)
-        return jsonify({"rating": rating})
+        return jsonify(result)
+
+    @app.route("/api/user/votes", methods=["GET"])
+    def user_votes_route() -> tuple[dict, int]:
+        user = current_user_payload()
+        if not user:
+            return {"votes": {}}, 200
+        raw_ids = request.args.get("pins", "")
+        pin_ids: list[int] = []
+        for chunk in raw_ids.split(","):
+            try:
+                parsed = int(chunk)
+            except (TypeError, ValueError):
+                continue
+            if parsed > 0:
+                pin_ids.append(parsed)
+        votes = user_votes_for_pins(user["nickname"], pin_ids)
+        return {"votes": votes}, 200
 
     @app.route("/pin/<token>")
     def share_pin(token: str) -> str:

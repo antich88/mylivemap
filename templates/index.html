@@ -84,12 +84,18 @@
             </div>
           </div>
         <div class="filter-panel__pane filter-panel__pane--profile">
-          <section class="user-panel" aria-label="Личный кабинет" aria-expanded="false" data-profile-mode="view">
-            <div class="user-panel__header">
-              <div class="user-panel__title">
-                <span class="user-panel__eyebrow">Личный кабинет</span>
-                <span id="auth-status" class="user-panel__nickname" aria-live="polite">{{ current_user.nickname if current_user else 'Гость' }}</span>
-              </div>
+              <section class="user-panel" aria-label="Личный кабинет" aria-expanded="false" data-profile-mode="view">
+                <div class="user-panel__header">
+                  <div class="user-panel__title">
+                    <span class="user-panel__eyebrow">Личный кабинет</span>
+                    <div class="user-panel__title-row">
+                      <span id="auth-status" class="user-panel__nickname" aria-live="polite">{{ current_user.nickname if current_user else 'Гость' }}</span>
+                      <div class="user-panel__rating-summary" data-profile-rating-wrapper>
+                        <span class="user-panel__rating-label">Общий рейтинг</span>
+                        <span class="user-panel__rating-value" data-profile-rating>{{ current_user.rating_total if current_user else '—' }}</span>
+                      </div>
+                    </div>
+                  </div>
               <div class="user-panel__actions">
                 <button type="button" class="profile-mode-btn" data-profile-action="toggle-edit" aria-pressed="false" data-profile-view-only>Редактировать профиль</button>
               </div>
@@ -97,8 +103,8 @@
 
             <div id="auth-message" class="user-panel__message" role="status" aria-live="polite"></div>
 
-            <div class="user-panel__content">
-              <div class="user-panel__settings">
+                <div class="user-panel__content">
+                  <div class="user-panel__settings">
                 <form id="profile-form" class="profile-form" autocomplete="off">
                   <div class="profile-avatar" data-profile-section="avatar">
                     <div class="profile-avatar__image" role="presentation">
@@ -120,6 +126,10 @@
                         <span class="profile-view-state__meta-item">
                           <span class="profile-view-state__meta-label">Пол</span>
                           <span id="profile-view-gender">{{ gender_labels.get(current_user.gender, '—') if current_user else '—' }}</span>
+                        </span>
+                        <span class="profile-view-state__meta-item">
+                          <span class="profile-view-state__meta-label">Рейтинг</span>
+                          <span id="profile-view-rating" data-profile-rating>{{ current_user.rating_total if current_user else '—' }}</span>
                         </span>
                       </div>
                     </div>
@@ -194,6 +204,16 @@
                       <button type="submit" class="profile-action profile-action--save" data-password-action="save">Сохранить</button>
                     </div>
                   </form>
+                </div>
+
+                <div class="user-panel__active-pins" data-active-pins-section>
+                  <div class="user-panel__active-pins-header">
+                    <h3 class="user-panel__active-pins-title">Мои активные точки</h3>
+                    <span class="user-panel__active-pins-count" data-active-pins-count>0/5</span>
+                  </div>
+                  <div class="user-panel__active-pins-list" data-active-pins-list>
+                    <p class="user-panel__active-pins-empty">Войдите, чтобы увидеть свои метки.</p>
+                  </div>
                 </div>
 
                 <div class="user-panel__footer">

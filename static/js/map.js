@@ -19,6 +19,7 @@ const USER_LIMIT_MESSAGE = 'Вы достигли лимита в 5 меток. 
 const POPUP_REOPEN_GUARD_MS = 200;
 const COMMENT_MAX_LENGTH = 500;
 const DEBUG_FILTER_PANEL = false;
+const ACTIVE_PINS_CLOCK_INTERVAL = 60_000;
 
 window.currentCreationMarker = null;
 window.userLocationMarker = null;
@@ -44,6 +45,12 @@ let currentAuthUser = bootstrapData.current_user || null;
 let authToggleBtn = null;
 let authPanelElement = null;
 let authPanelVisible = false;
+const VOTE_DIRECTION_VALUES = {
+  up: 1,
+  down: -1,
+};
+let currentUserVotes = new Map();
+const voteInFlightPins = new Set();
 const AUTH_MODES = {
   LOGIN: 'login',
   REGISTER: 'register',
@@ -55,6 +62,8 @@ const PROFILE_GENDER_LABELS = {
 };
 let currentAuthMode = AUTH_MODES.LOGIN;
 let resetProfileToViewMode = null;
+let activePinsClockId = null;
+let activePinsElementsCache = null;
 
 function ensureProfileViewMode() {
   if (typeof resetProfileToViewMode === 'function') {
@@ -373,6 +382,7 @@ function fetchPins() {
       applyCategoryFilters();
       focusSharedPinIfNeeded();
       updateCounters();
+      populateVoteState(pins);
       restoreOpenPinPopupState(popupState);
     })
     .catch((error) => {
@@ -602,6 +612,28 @@ function restoreOpenPinPopupState(state) {
   });
 }
 
+function renderPinAuthorIntro(pin) {
+  const author = pin.author || {};
+  const nickname = author.nickname || pin.user_id || pin.nickname || 'Автор';
+  const safeNickname = escapeHtml(nickname);
+  const avatarUrl = author.avatar_url || pin.avatar_url;
+  const avatarMarkup = avatarUrl
+    ? `<img src="${avatarUrl}" alt="Аватар ${safeNickname}" loading="lazy" />`
+    : `<span class="pin-popup__author-avatar-placeholder">${safeNickname.charAt(0).toUpperCase()}</span>`;
+
+  return `
+    <div class="pin-popup__author">
+      <div class="pin-popup__author-avatar" aria-hidden="true">
+        ${avatarMarkup}
+      </div>
+      <div class="pin-popup__author-info">
+        <span class="pin-popup__author-label">Автор</span>
+        <span class="pin-popup__author-nickname">${safeNickname}</span>
+      </div>
+    </div>
+  `;
+}
+
 function createPopupContent(pin) {
   const category = getCategoryBySlug(pin.category_slug);
   const currentNickname = currentAuthUser?.nickname || null;
@@ -610,18 +642,24 @@ function createPopupContent(pin) {
     ? `<button class="delete-pin delete-pin-btn" data-pin-id="${pin.id}">Удалить</button>`
     : '';
   const shareUrl = new URL(`/pin/${pin.shared_token}`, window.location.origin).href;
+  const authorIntroMarkup = renderPinAuthorIntro(pin);
+  const voteControlsMarkup = renderVoteControls(pin);
   const commentsList = renderCommentsList(pin.comments || [], currentNickname, pin.id);
   const commentForm = renderCommentForm(currentNickname, pin.id);
 
   return `
     <div class="pin-popup" data-pin-id="${pin.id}">
+      ${authorIntroMarkup}
       <strong>${pin.nickname}</strong>
       <p class="pin-popup__category">${category?.icon ?? ''} ${category?.label ?? 'Категория'}</p>
       <p>${pin.description}</p>
       <div class="pin-popup__meta">
         <span>Контакт: ${pin.contact || '—'}</span>
-        <span>Рейтинг: ${pin.rating}</span>
+        <span>
+          Рейтинг: <span class="pin-popup__rating-value" data-pin-rating-value data-pin-rating-pin="${pin.id}">${pin.rating}</span>
+        </span>
       </div>
+      ${voteControlsMarkup}
       <p class="pin-popup__ttl">Живёт ещё: ${pin.ttl_seconds ? Math.ceil(pin.ttl_seconds / 60) : '∞'} мин.</p>
       <div class="pin-popup__actions">
         <button type="button" class="popup-share${isAuthor ? '' : ' popup-share--single'}" data-share-url="${shareUrl}">Поделиться</button>
@@ -933,6 +971,137 @@ function formatTimestamp(timestamp) {
   } catch (_error) {
     return '';
   }
+}
+
+function getActivePinsListElement() {
+  const section = document.querySelector('[data-active-pins-section]');
+  if (!section) {
+    return null;
+  }
+  return section.querySelector('[data-active-pins-list]');
+}
+
+function getActivePinsCountElement() {
+  const section = document.querySelector('[data-active-pins-section]');
+  if (!section) {
+    return null;
+  }
+  return section.querySelector('[data-active-pins-count]');
+}
+
+function getCurrentUserPins() {
+  const nickname = currentAuthUser?.nickname;
+  if (!nickname) {
+    return [];
+  }
+  return activeMarkers
+    .map(({ pin }) => pin)
+    .filter((pin) => pin.user_id === nickname);
+}
+
+function getActivePinText(pin) {
+  const ttl = typeof pin.ttl_seconds === 'number' && !Number.isNaN(pin.ttl_seconds)
+    ? Math.max(0, Math.ceil(pin.ttl_seconds / 60))
+    : '∞';
+  const rating = Number.isFinite(pin.rating) ? pin.rating : 0;
+  return `Рейтинг: ${rating} · Живёт ещё: ${ttl} мин.`;
+}
+
+function createActivePinMarkup(pin) {
+  const title = escapeHtml(pin.nickname || 'Метка');
+  const meta = getActivePinText(pin);
+  return `
+    <article class="user-panel__active-pin" data-active-pin-id="${pin.id}">
+      <a class="user-panel__active-pin-title" href="#" data-active-pin-title data-pin-id="${pin.id}">
+        ${title}
+      </a>
+      <div class="user-panel__active-pin-meta">
+        <span>${meta}</span>
+      </div>
+      <div class="user-panel__active-pin-actions">
+        <button type="button" class="user-panel__delete-pin-btn" data-active-pin-delete data-pin-id="${pin.id}">Удалить сейчас</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderActivePinsList() {
+  const listEl = getActivePinsListElement();
+  const countEl = getActivePinsCountElement();
+  if (!listEl || !countEl) {
+    return;
+  }
+  const nickname = currentAuthUser?.nickname;
+  if (!nickname) {
+    listEl.innerHTML = '<p class="user-panel__active-pins-empty">Войдите, чтобы увидеть свои метки.</p>';
+    countEl.textContent = `0/${USER_MARKER_LIMIT}`;
+    return;
+  }
+  const pins = getCurrentUserPins();
+  countEl.textContent = `${pins.length}/${USER_MARKER_LIMIT}`;
+  if (!pins.length) {
+    listEl.innerHTML = '<p class="user-panel__active-pins-empty">Активных меток пока нет.</p>';
+    return;
+  }
+  listEl.innerHTML = pins.map((pin) => createActivePinMarkup(pin)).join('');
+}
+
+function handleActivePinsListClick(event) {
+  const title = event.target.closest('[data-active-pin-title]');
+  if (title) {
+    event.preventDefault();
+    const pinId = Number(title.dataset.pinId);
+    if (pinId) {
+      focusPinFromList(pinId);
+    }
+    return;
+  }
+  const deleteBtn = event.target.closest('[data-active-pin-delete]');
+  if (deleteBtn) {
+    event.preventDefault();
+    const pinId = Number(deleteBtn.dataset.pinId);
+    if (!pinId) {
+      return;
+    }
+    if (confirm('Удалить метку сейчас? Это действие необратимо.')) {
+      handleDeletePin(pinId);
+    }
+  }
+}
+
+function focusPinFromList(pinId) {
+  const entry = getActiveMarkerEntry(pinId);
+  if (!entry || !entry.pin || !map) {
+    return;
+  }
+  const { pin, marker } = entry;
+  map.flyTo([pin.lat, pin.lng], Math.max(map.getZoom(), 14), { animate: true });
+  if (marker && typeof marker.openPopup === 'function') {
+    marker.openPopup();
+  }
+}
+
+function startActivePinsClock() {
+  stopActivePinsClock();
+  activePinsClockId = setInterval(() => {
+    renderActivePinsList();
+  }, ACTIVE_PINS_CLOCK_INTERVAL);
+}
+
+function stopActivePinsClock() {
+  if (activePinsClockId) {
+    clearInterval(activePinsClockId);
+    activePinsClockId = null;
+  }
+}
+
+function bindActivePinsActions() {
+  const listEl = getActivePinsListElement();
+  if (!listEl) {
+    return;
+  }
+  listEl.removeEventListener('click', handleActivePinsListClick);
+  listEl.addEventListener('click', handleActivePinsListClick);
 }
 
 function applyPopupFadeEffect(popup) {
@@ -1294,6 +1463,13 @@ function renderAuthState(message = '') {
   syncAuthToggleAppearance();
   setAuthToggleAvatar(authenticated ? currentAuthUser?.avatar_url : null);
   emitProfileAuthEvent({ authenticated, user: currentAuthUser, message });
+  renderActivePinsList();
+  bindActivePinsActions();
+  if (authenticated) {
+    startActivePinsClock();
+  } else {
+    stopActivePinsClock();
+  }
 }
 
 function initProfileSettings() {
@@ -1932,6 +2108,7 @@ function updateCounters() {
       counter.textContent = counts[slug] || '0';
     }
   });
+  renderActivePinsList();
 }
 
 function handleDeletePin(pinId) {
@@ -1954,6 +2131,7 @@ function handleDeletePin(pinId) {
       }
       removePinFromMap(pinId);
       map.closePopup();
+      showUserToast('Метка удалена.');
     })
     .catch((error) => {
       alert(error.message);
@@ -1987,6 +2165,7 @@ function removePinFromMap(pinId) {
     const { marker } = activeMarkers[index];
     marker.remove();
     activeMarkers.splice(index, 1);
+    updateCounters();
   }
 }
 
@@ -2225,6 +2404,42 @@ document.addEventListener('click', function (e) {
     return;
   }
 
+  const voteBtn = e.target.closest('.pin-vote-btn');
+  if (voteBtn) {
+    e.preventDefault();
+    const pinId = Number(voteBtn.dataset.pinId);
+    if (!pinId || voteInFlightPins.has(pinId)) {
+      return;
+    }
+    const direction = voteBtn.dataset.voteDirection;
+    const voteValue = VOTE_DIRECTION_VALUES[direction] || 0;
+    const targetValue = currentUserVotes.get(pinId) === voteValue ? 0 : voteValue;
+    voteInFlightPins.add(pinId);
+    fetch(`/api/pins/${pinId}/vote`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({ vote: targetValue }),
+    })
+      .then(handleJsonResponse)
+      .then((payload) => {
+        currentUserVotes.set(pinId, targetValue);
+        updatePopupRating(pinId, payload.pin_rating);
+        updateProfileRating(payload.profile_rating);
+        refreshPinPopup(pinId);
+      })
+      .catch((error) => {
+        console.error('Vote failed', error);
+        showUserToast(error.message || 'Не удалось отправить голос.');
+      })
+      .finally(() => {
+        voteInFlightPins.delete(pinId);
+      });
+    return;
+  }
+
   const shareButton = e.target.closest('.popup-share');
   if (shareButton) {
     e.preventDefault();
@@ -2409,4 +2624,68 @@ function collapseFilterPanelAnimated() {
   requestAnimationFrame(() => {
     panel.classList.add('collapsed');
   });
+}
+function renderVoteControls(pin) {
+  const currentValue = currentUserVotes.get(pin.id) || 0;
+  const upActiveClass = currentValue === 1 ? 'pin-vote-btn--active' : '';
+  const downActiveClass = currentValue === -1 ? 'pin-vote-btn--active' : '';
+  return `
+    <div class="pin-popup__vote-controls" data-pin-id="${pin.id}">
+      <button type="button" class="pin-vote-btn pin-vote-btn--up ${upActiveClass}" data-pin-id="${pin.id}" data-vote-direction="up" aria-pressed="${currentValue === 1}" aria-label="Поставить лайк">▲</button>
+      <button type="button" class="pin-vote-btn pin-vote-btn--down ${downActiveClass}" data-pin-id="${pin.id}" data-vote-direction="down" aria-pressed="${currentValue === -1}" aria-label="Поставить дизлайк">▼</button>
+    </div>
+  `;
+}
+
+function populateVoteState(pins) {
+  if (!currentAuthUser?.nickname || !Array.isArray(pins)) {
+    currentUserVotes.clear();
+    return;
+  }
+  const activeIds = pins.map((pin) => Number(pin.id)).filter(Boolean);
+  if (!activeIds.length) {
+    currentUserVotes.clear();
+    return;
+  }
+  const params = new URLSearchParams();
+  params.set('pins', activeIds.join(','));
+  fetch(`/api/user/votes?${params.toString()}`, { credentials: 'same-origin' })
+    .then((response) => response.json())
+    .then((payload) => {
+      const votes = payload?.votes || {};
+      currentUserVotes.clear();
+      Object.entries(votes).forEach(([pinId, value]) => {
+        currentUserVotes.set(Number(pinId), Number(value));
+      });
+    })
+    .catch(() => {
+      currentUserVotes.clear();
+    });
+}
+
+function updatePopupRating(pinId, rating) {
+  const ratingElem = document.querySelector(`.pin-popup__rating-value[data-pin-rating-pin="${pinId}"]`);
+  if (ratingElem) {
+    ratingElem.textContent = Number.isFinite(rating) ? rating : '0';
+  }
+}
+
+function refreshPinPopup(pinId) {
+  const popup = document.querySelector(`.pin-popup[data-pin-id="${pinId}"]`);
+  if (!popup) {
+    return;
+  }
+  const voteControls = popup.querySelector('.pin-popup__vote-controls');
+  if (!voteControls) {
+    return;
+  }
+  const newMarkup = renderVoteControls({ id: pinId });
+  voteControls.outerHTML = newMarkup;
+}
+
+function updateProfileRating(value) {
+  const ratingEl = document.querySelector('[data-profile-rating]');
+  if (ratingEl) {
+    ratingEl.textContent = Number.isFinite(value) && value !== null ? value : '—';
+  }
 }
