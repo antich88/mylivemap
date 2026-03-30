@@ -1289,6 +1289,18 @@ function setAuthPanelVisibility(visible) {
   }
 }
 
+function updateGuestUserPanels(authenticated) {
+  const userContent = document.querySelector('[data-user-content]');
+  const guestContent = document.querySelector('[data-guest-content]');
+  if (authenticated) {
+    userContent?.classList.remove('is-hidden');
+    guestContent?.classList.add('is-hidden');
+  } else {
+    userContent?.classList.add('is-hidden');
+    guestContent?.classList.remove('is-hidden');
+  }
+}
+
 function toggleUserPanelExpandedState(expanded) {
   const panel = document.querySelector('.user-panel');
   const filterShell = getFilterPanelElement();
@@ -1418,15 +1430,18 @@ function emitProfileAuthEvent(detail = {}) {
 function renderAuthState(message = '') {
   const { statusEl, authForm, logoutBtn, switchLink, switchText, authTitle, messageEl, panelEl } = getAuthElements();
   const authenticated = isAuthenticated();
+  const previousAuthenticated = Boolean(renderAuthState.previousAuthenticated);
+  const justLoggedIn = authenticated && !previousAuthenticated;
   const nickname = currentAuthUser?.nickname || '';
   const displayNameInput = document.querySelector('.user-panel__input[name="profile_display_name"]');
   const userPanelEl = document.querySelector('.user-panel');
+  updateGuestUserPanels(authenticated);
   if (displayNameInput) {
     displayNameInput.value = nickname;
     displayNameInput.disabled = !authenticated;
   }
   if (statusEl) {
-    statusEl.textContent = authenticated ? nickname : 'Не авторизован';
+    statusEl.textContent = authenticated ? nickname : '';
   }
   if (panelEl) {
     panelEl.classList.toggle('auth-panel--authenticated', authenticated);
@@ -1467,9 +1482,14 @@ function renderAuthState(message = '') {
   bindActivePinsActions();
   if (authenticated) {
     startActivePinsClock();
+    if (justLoggedIn) {
+      expandFilterPanel();
+      toggleUserPanelExpandedState(true);
+    }
   } else {
     stopActivePinsClock();
   }
+  renderAuthState.previousAuthenticated = authenticated;
 }
 
 function initProfileSettings() {
@@ -1929,6 +1949,89 @@ function initAuthWidget() {
   }
 
   refreshCurrentUser();
+  attachAuthFormInputFocusHandlers();
+  attachUserPanelMobileShiftHandlers();
+}
+
+function attachAuthFormInputFocusHandlers() {
+  const { authForm } = getAuthElements();
+  if (!authForm) {
+    return;
+  }
+  const inputs = Array.from(authForm.querySelectorAll('input, textarea, select'));
+  if (!inputs.length) {
+    return;
+  }
+  inputs.forEach((input) => {
+    input.addEventListener('focus', function () {
+      if (window.innerWidth >= MOBILE_BREAKPOINT_PX) {
+        return;
+      }
+      setTimeout(() => {
+        try {
+          this.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } catch (_error) {
+          // ignore
+        }
+      }, 300);
+    });
+  });
+}
+
+function attachUserPanelMobileShiftHandlers() {
+  const panel = document.querySelector('.user-panel');
+  if (!panel) {
+    return;
+  }
+  let resetTimeoutId = null;
+
+  const setPanelTransform = (value) => {
+    panel.style.transition = 'transform 0.3s ease';
+    panel.style.transform = value;
+  };
+
+  const handleFocusIn = () => {
+    if (!isMobileViewport()) {
+      return;
+    }
+    if (resetTimeoutId) {
+      clearTimeout(resetTimeoutId);
+      resetTimeoutId = null;
+    }
+    setPanelTransform('translateY(-30%)');
+  };
+
+  const handleFocusOut = (event) => {
+    if (!isMobileViewport()) {
+      return;
+    }
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Element && panel.contains(nextTarget)) {
+      return;
+    }
+    if (resetTimeoutId) {
+      clearTimeout(resetTimeoutId);
+    }
+    resetTimeoutId = setTimeout(() => {
+      setPanelTransform('translateY(0)');
+      resetTimeoutId = null;
+    }, 40);
+  };
+
+  const handleResize = () => {
+    if (isMobileViewport()) {
+      return;
+    }
+    if (resetTimeoutId) {
+      clearTimeout(resetTimeoutId);
+      resetTimeoutId = null;
+    }
+    setPanelTransform('translateY(0)');
+  };
+
+  document.addEventListener('focusin', handleFocusIn);
+  document.addEventListener('focusout', handleFocusOut);
+  window.addEventListener('resize', handleResize);
 }
 
 function copyTextToClipboard(text) {
@@ -2221,17 +2324,24 @@ window.addEventListener('load', function () {
     map.invalidateSize();
   }, 100);
 
-  const geolocateBtn = L.DomUtil.create('a', 'leaflet-control-zoom-geolocate');
-  geolocateBtn.innerHTML = '➤';
-  geolocateBtn.href = '#';
-  geolocateBtn.title = 'Центровать на мне';
-  L.DomEvent.on(geolocateBtn, 'click', L.DomEvent.stopPropagation);
-  geolocateBtn.addEventListener('click', (event) => {
-    event.preventDefault();
-    findUserLocation();
-  });
   const zoomContainer = map.zoomControl.getContainer();
-  zoomContainer.appendChild(geolocateBtn);
+  if (zoomContainer) {
+    const geolocateBtn = document.createElement('button');
+    geolocateBtn.type = 'button';
+    geolocateBtn.className = 'leaflet-control-zoom-geolocate';
+    geolocateBtn.setAttribute('aria-label', 'Центровать на меня');
+    geolocateBtn.innerHTML = `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3.5l4.5 7.8-4.5 7.7-4.5-7.7L12 3.5z" />
+      </svg>
+    `;
+    L.DomEvent.on(geolocateBtn, 'click', L.DomEvent.stopPropagation);
+    geolocateBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      findUserLocation();
+    });
+    zoomContainer.appendChild(geolocateBtn);
+  }
 
   const panelHandleContainer = document.querySelector('.panel-handle-container');
   const filterPanel = document.querySelector('.filter-panel');

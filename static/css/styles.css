@@ -341,6 +341,10 @@ header.filter-panel.minimized .category-chip {
   display: none !important;
 }
 
+.is-hidden {
+  display: none !important;
+}
+
 .user-panel__content {
   display: none;
   grid-template-columns: minmax(0, 1fr);
@@ -361,6 +365,10 @@ header.filter-panel.minimized .category-chip {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.user-panel[data-profile-mode="edit"] .user-panel__active-pins {
+  display: none;
 }
 
 .user-panel__active-pins-header {
@@ -710,27 +718,110 @@ header.filter-panel.minimized .category-chip {
 }
 
 .leaflet-control-zoom {
-  margin-top: 130px !important;
+  position: fixed !important;
+  top: calc(env(safe-area-inset-top, 10px) + 10px) !important;
+  left: 15px !important;
+  z-index: 99999 !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
-.leaflet-control-zoom a.leaflet-control-zoom-geolocate,
-.leaflet-control-zoom a.leaflet-control-zoom-geolocate:visited {
+.leaflet-control-zoom.leaflet-bar {
   display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.35rem;
+  background: rgba(8, 8, 8, 0.9);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.65);
+}
+
+.leaflet-top.leaflet-left {
+  margin-top: 0 !important;
+  top: auto !important;
+}
+
+.leaflet-control-zoom a {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(10, 10, 10, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  line-height: 30px;
-  background: #fff;
-  color: #111;
-  border: 1px solid rgba(0, 0, 0, 0.2);
-  text-decoration: none;
-  border-left: none;
+  font-size: 1.9rem;
+  font-weight: 600;
+  color: #ffffff;
+  transition: background 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.5);
+  padding: 0;
+  line-height: 1;
 }
 
-.leaflet-control-zoom a.leaflet-control-zoom-geolocate:last-child {
-  border-right: 1px solid rgba(0, 0, 0, 0.2);
+.leaflet-control-zoom a.leaflet-control-zoom-in,
+.leaflet-control-zoom a.leaflet-control-zoom-out {
+  border-radius: 50% !important;
+  width: 48px !important;
+  height: 48px !important;
+  padding: 0;
+  border-bottom: none;
 }
+
+.leaflet-control-zoom a::after {
+  content: '';
+  position: absolute;
+}
+
+.leaflet-control-zoom a:first-child {
+  margin-bottom: 0.4rem;
+  border-bottom: none;
+}
+
+.leaflet-control-zoom a:last-child {
+  margin-top: 0.4rem;
+}
+.leaflet-control-zoom button.leaflet-control-zoom-geolocate {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(10, 10, 10, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.5);
+  transition: background 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+}
+
+.leaflet-control-zoom button.leaflet-control-zoom-geolocate svg {
+  width: 22px;
+  height: 22px;
+  stroke: #ffffff;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+.leaflet-control-zoom a:hover,
+.leaflet-control-zoom a:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.45);
+  transform: translateY(-1px);
+}
+
+.leaflet-control-zoom button.leaflet-control-zoom-geolocate:hover,
+.leaflet-control-zoom button.leaflet-control-zoom-geolocate:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.45);
+  transform: translateY(-1px);
+}
+
 
 .leaflet-tile-pane {
   z-index: 50;
@@ -751,6 +842,18 @@ header.filter-panel.minimized .category-chip {
 
 .leaflet-top.leaflet-left {
   margin-top: 250px !important;
+  top: calc(env(safe-area-inset-top, 0px) + 0.25rem) !important;
+  left: auto !important;
+  right: 1.5rem !important;
+  z-index: 2500 !important;
+}
+
+@media (max-width: 768px) {
+  .leaflet-control-zoom {
+    top: 40% !important;
+    right: 15px !important;
+    left: auto !important;
+  }
 }
 
 .leaflet-control-attribution {
@@ -1403,7 +1506,8 @@ header.filter-panel.minimized .category-chip {
     padding 0.35s ease,
     margin 0.35s ease,
     border-color 0.35s ease,
-    box-shadow 0.35s ease;
+    box-shadow 0.35s ease,
+    transform 0.3s ease;
   will-change: transform, max-height, box-shadow;
   min-height: 0;
 }
@@ -1691,8 +1795,11 @@ header.filter-panel.minimized .category-chip {
 }
 
 .user-panel__auth {
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
   padding-top: 0.75rem;
+}
+
+.user-panel__guest-content {
+  margin-top: 0.75rem;
 }
 
 .user-panel--expanded {
@@ -1887,6 +1994,78 @@ header.filter-panel.minimized .category-chip {
 
 .auth-panel__form input::placeholder {
   color: rgba(255, 255, 255, 0.6);
+}
+
+.search-panel {
+  background: rgba(10, 12, 20, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1rem;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.search-panel__body {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.search-panel__field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.search-panel__label {
+  font-size: 0.75rem;
+  letter-spacing: 0.01em;
+}
+
+.search-panel__input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 20, 35, 0.9);
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-family: inherit;
+  outline: none;
+}
+
+.search-panel__btn {
+  background: #4b7bff;
+  color: #ffffff;
+  border: none;
+  border-radius: 0.75rem;
+  padding: 0.55rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(75, 123, 255, 0.35);
+}
+
+.search-results {
+  border-radius: 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.5rem 0.75rem;
+  background: rgba(5, 7, 12, 0.9);
+  max-height: 180px;
+  overflow-y: auto;
+  display: none;
+}
+
+.search-results:not(.is-hidden) {
+  display: block;
+}
+
+.is-hidden {
+  display: none !important;
 }
 
 .auth-widget__status {

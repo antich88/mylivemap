@@ -58,6 +58,7 @@ if LOCAL_MODE:
     users_table = None  # type: ignore
     profiles_table = None  # type: ignore
     votes_table = None  # type: ignore
+    friendships_table = None  # type: ignore
 
 else:
     from sqlalchemy import (
@@ -72,6 +73,7 @@ else:
         Text,
         UniqueConstraint,
         create_engine,
+        inspect,
         text,
     )
     from sqlalchemy.exc import SQLAlchemyError
@@ -126,6 +128,7 @@ else:
         Column("metadata", Text),
         Column("shared_token", String(255), unique=True),
         Column("user_id", String(255), nullable=False, default=""),
+        Column("image_url", String(512)),
         UniqueConstraint("shared_token", name="uq_pins_shared_token"),
     )
 
@@ -162,6 +165,16 @@ else:
         UniqueConstraint("pin_id", "user_id", name="uq_votes_pin_user"),
     )
 
+    friendships_table = Table(
+        "friendships",
+        metadata,
+        Column("id", Integer, primary_key=True),
+        Column("user_id", String(255), ForeignKey("users.nickname", ondelete="CASCADE"), nullable=False),
+        Column("friend_id", String(255), ForeignKey("users.nickname", ondelete="CASCADE"), nullable=False),
+        Column("status", String(32), nullable=False, server_default=text("'pending'"), default="pending"),
+        UniqueConstraint("user_id", "friend_id", name="uq_friendships_user_friend"),
+    )
+
 
     def init_schema() -> None:
         metadata.create_all(ENGINE)
@@ -190,3 +203,22 @@ else:
 
     if DATABASE_URL.startswith("sqlite"):
         init_schema()
+
+
+    def _ensure_remote_schema_updates() -> None:
+        if not DATABASE_URL.startswith("postgres"):
+            return
+        inspector = inspect(ENGINE)
+        table_names = set(inspector.get_table_names())
+        if "friendships" not in table_names:
+            metadata.create_all(ENGINE, tables=[friendships_table])
+            table_names.add("friendships")
+        if "pins" not in table_names:
+            return
+        columns = {col["name"] for col in inspector.get_columns("pins")}
+        if "image_url" not in columns:
+            with ENGINE.begin() as conn:
+                conn.execute(text("ALTER TABLE pins ADD COLUMN image_url VARCHAR(512)"))
+
+
+    _ensure_remote_schema_updates()

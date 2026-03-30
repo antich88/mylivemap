@@ -9,12 +9,62 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import uuid4
 
 from config import CATEGORY_DEFINITIONS, LOCAL_PINS_PATH, is_local_mode, ttl_for
-from database import LocalPinStore, pins_table, session_scope, votes_table
+from database import (
+    LocalPinStore,
+    metadata,
+    pins_table,
+    session_scope,
+    votes_table,
+    friendships_table,
+    users_table,
+)
 
 
 LOCAL_MODE = is_local_mode()
 _LOCAL_STORE = LocalPinStore(LOCAL_PINS_PATH) if LOCAL_MODE else None
 logger = logging.getLogger(__name__)
+
+
+if not LOCAL_MODE and metadata is not None and friendships_table is not None and users_table is not None:
+    from sqlalchemy.orm import declarative_base, relationship
+
+    Base = declarative_base(metadata=metadata)
+
+
+    class Friendship(Base):
+        __table__ = friendships_table
+        user = relationship(
+            "User",
+            foreign_keys=[friendships_table.c.user_id],
+            back_populates="_friendships",
+        )
+        friend = relationship(
+            "User",
+            foreign_keys=[friendships_table.c.friend_id],
+            viewonly=True,
+        )
+
+
+    class User(Base):
+        __table__ = users_table
+        _friendships = relationship(
+            "Friendship",
+            back_populates="user",
+            lazy="joined",
+        )
+        friends = relationship(
+            "User",
+            secondary=friendships_table,
+            primaryjoin=users_table.c.nickname == friendships_table.c.user_id,
+            secondaryjoin=users_table.c.nickname == friendships_table.c.friend_id,
+            viewonly=True,
+            lazy="joined",
+        )
+
+else:
+    Base = None  # type: ignore
+    Friendship = None  # type: ignore
+    User = None  # type: ignore
 
 
 def _coerce_dt(value):
