@@ -23,7 +23,18 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY must be set via environment variable")
 DEFAULT_SQLITE_URL = f"sqlite:///{DATABASE_PATH}"
-DATABASE_URL = os.environ.get("DATABASE_URL", DEFAULT_SQLITE_URL)
+
+
+def _normalize_database_url(raw_url: str | None) -> str | None:
+    if not raw_url:
+        return raw_url
+    normalized = raw_url.strip()
+    if normalized.startswith("postgres://"):
+        return "postgresql://" + normalized[len("postgres://"):]
+    return normalized
+
+
+DATABASE_URL = _normalize_database_url(os.environ.get("DATABASE_URL") or DEFAULT_SQLITE_URL)
 LOCAL_PINS_PATH = DB_DIR / "pins.json"
 LOCAL_USERS_PATH = DB_DIR / "users.json"
 LOCAL_PROFILES_PATH = DB_DIR / "profiles.json"

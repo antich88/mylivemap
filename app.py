@@ -525,6 +525,7 @@ def create_app() -> Flask:
                     payload["author"] = {
                         "nickname": author.get("nickname") or user_id,
                         "avatar_url": author.get("avatar_url"),
+                        "rating_total": author.get("rating_total"),
                     }
                 else:
                     payload["author"] = None
@@ -658,7 +659,14 @@ def create_app() -> Flask:
         result = record_vote(pin_id, user["nickname"], vote_value)
         if not result:
             abort(404)
-        return jsonify(result)
+        response_payload = {
+            "pin_rating": result["pin_rating"],
+            "vote_value": result["vote_value"],
+            "pin_owner": result["pin_owner"],
+        }
+        if result.get("profile_rating") is not None and result["pin_owner"] == user["nickname"]:
+            response_payload["profile_rating"] = result["profile_rating"]
+        return jsonify(response_payload)
 
     @app.route("/api/user/votes", methods=["GET"])
     def user_votes_route() -> tuple[dict, int]:

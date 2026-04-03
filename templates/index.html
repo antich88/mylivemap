@@ -98,6 +98,30 @@
 
                 <div id="auth-message" class="user-panel__message" role="status" aria-live="polite"></div>
 
+                <section class="user-panel__author-view is-hidden" aria-label="Информация об авторе" data-author-view>
+                  <div class="user-panel__author-view-header">
+                    <button type="button" class="author-view__close" data-author-action="close">
+                      ← Назад к профилю
+                    </button>
+                  </div>
+                  <div class="user-panel__author-view-body">
+                    <div class="pin-popup__author user-panel__author-intro">
+                      <div class="pin-popup__author-avatar" aria-hidden="true" data-author-avatar>
+                        <span class="pin-popup__author-avatar-placeholder">А</span>
+                      </div>
+                      <div class="pin-popup__author-info">
+                        <span class="pin-popup__author-label">Автор</span>
+                        <span class="pin-popup__author-nickname" data-author-name>Автор</span>
+                      </div>
+                    </div>
+                    <div class="author-view__meta">
+                      <span class="author-view__meta-label">Рейтинг автора</span>
+                      <span class="author-view__meta-value" data-author-rating>—</span>
+                    </div>
+                    <p class="author-view__hint">Тут отображаются сведения о создателе метки.</p>
+                  </div>
+                </section>
+
                 <div class="user-panel__content user-panel__user-content {% if not current_user %}is-hidden{% endif %}" data-user-content>
                   <div class="user-panel__settings">
                     <form id="profile-form" class="profile-form" autocomplete="off">

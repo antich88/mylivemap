@@ -718,6 +718,7 @@ def record_vote(pin_id: int, user_id: str, vote_value: int) -> Optional[dict]:
                 "pin_rating": int(record.get("rating", 0)),
                 "vote_value": vote_value,
                 "profile_rating": profile_rating,
+                "pin_owner": pin_owner,
             }
         return None
 
@@ -791,6 +792,7 @@ def record_vote(pin_id: int, user_id: str, vote_value: int) -> Optional[dict]:
             "pin_rating": int(updated_rating or 0),
             "vote_value": vote_value,
             "profile_rating": profile_rating,
+            "pin_owner": owner,
         }
 
 

@@ -28,6 +28,10 @@ let map;
 let pendingSharedPinToken = null;
 let creationSelection = getDefaultCreationSelection();
 let touchStartY = null;
+const PANEL_HANDLE_SWIPE_THRESHOLD = 24;
+let panelHandleTouchActive = false;
+const MAP_COLLAPSE_SUPPRESSION_MS = 450;
+let suppressMapCollapseUntil = 0;
 let showAllMode = SHOW_ALL_MODES.OFF;
 let showAllBtn = null;
 let refreshBtn = null;
@@ -45,6 +49,7 @@ let currentAuthUser = bootstrapData.current_user || null;
 let authToggleBtn = null;
 let authPanelElement = null;
 let authPanelVisible = false;
+let ignorePanelHandleClick = false;
 const VOTE_DIRECTION_VALUES = {
   up: 1,
   down: -1,
@@ -156,6 +161,7 @@ function minimizeFilterPanelForCreation() {
 
 function restoreFilterPanelAfterCreation() {
   releaseFilterPanelForMobile();
+  collapseFilterPanelAnimated();
 }
 
 function minimizeFilterPanelForPinPopup() {
@@ -164,6 +170,16 @@ function minimizeFilterPanelForPinPopup() {
 
 function restoreFilterPanelAfterPinPopup() {
   releaseFilterPanelForMobile();
+  collapseFilterPanelAnimated();
+}
+
+function collapseDesktopPanels() {
+  if (isMobileViewport()) {
+    return;
+  }
+  collapseFilterPanelAnimated();
+  setAuthPanelVisibility(false);
+  toggleUserPanelExpandedState(false);
 }
 
 function centerPinPopupOnMobile(pinId) {
@@ -628,11 +644,145 @@ function renderPinAuthorIntro(pin) {
       </div>
       <div class="pin-popup__author-info">
         <span class="pin-popup__author-label">Автор</span>
-        <span class="pin-popup__author-nickname">${safeNickname}</span>
+        <button type="button" class="pin-popup__author-nickname-btn" data-author-panel-trigger>
+          <span class="pin-popup__author-nickname">${safeNickname}</span>
+        </button>
       </div>
     </div>
   `;
 }
+
+function buildPinAuthorInfo(pin) {
+  const author = (pin.author && typeof pin.author === 'object') ? pin.author : {};
+  const nickname = author.nickname || pin.user_id || pin.nickname || 'Автор';
+  const avatar_url = author.avatar_url || pin.avatar_url || '';
+  const rating_total = typeof author.rating_total === 'number' ? author.rating_total : null;
+  return { nickname, avatar_url, rating_total };
+}
+
+function getAuthorPanelElements() {
+  const panel = document.querySelector('.user-panel');
+  if (!panel) {
+    return {};
+  }
+  return {
+    panel,
+    authorView: panel.querySelector('[data-author-view]'),
+    userContent: panel.querySelector('[data-user-content]'),
+    authorAvatar: panel.querySelector('[data-author-avatar]'),
+    authorName: panel.querySelector('[data-author-name]'),
+    authorRating: panel.querySelector('[data-author-rating]'),
+    authorClose: panel.querySelector('[data-author-action="close"]'),
+  };
+}
+
+function formatAuthorRating(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value === 'string' && value.trim().length) {
+    return value;
+  }
+  return '—';
+}
+
+function renderAuthorAvatar(author) {
+  const { authorAvatar, authorName } = getAuthorPanelElements();
+  if (!authorAvatar || !authorName) {
+    return;
+  }
+  const nickname = author.nickname || 'Автор';
+  const letter = nickname.trim().charAt(0).toUpperCase() || 'А';
+  authorAvatar.innerHTML = '';
+  if (author.avatar_url) {
+    const img = document.createElement('img');
+    img.src = author.avatar_url;
+    img.alt = `Аватар ${nickname}`;
+    img.loading = 'lazy';
+    authorAvatar.appendChild(img);
+  } else {
+    const placeholder = document.createElement('span');
+    placeholder.className = 'pin-popup__author-avatar-placeholder';
+    placeholder.textContent = letter;
+    authorAvatar.appendChild(placeholder);
+  }
+}
+
+function updateAuthorPanelContent(author) {
+  const { authorName, authorRating } = getAuthorPanelElements();
+  if (authorName) {
+    authorName.textContent = author.nickname || 'Автор';
+  }
+  if (authorRating) {
+    authorRating.textContent = formatAuthorRating(author.rating_total);
+  }
+  renderAuthorAvatar(author);
+}
+
+function showAuthorPanel(author) {
+  const { panel, authorView, userContent } = getAuthorPanelElements();
+  if (!panel || !authorView || !userContent) {
+    return;
+  }
+  updateAuthorPanelContent(author);
+  authorView.classList.remove('is-hidden');
+  userContent.classList.add('is-hidden');
+  panel.setAttribute('data-panel-visible', 'author');
+  toggleUserPanelExpandedState(true, 'author');
+}
+
+function showUserProfilePanel() {
+  const { panel, authorView, userContent } = getAuthorPanelElements();
+  if (!panel || !userContent) {
+    return;
+  }
+  authorView?.classList.add('is-hidden');
+  userContent.classList.remove('is-hidden');
+  panel.setAttribute('data-panel-visible', 'profile');
+  toggleUserPanelExpandedState(true, 'profile');
+}
+
+function bindAuthorPanelCloseHandler() {
+  const { authorClose } = getAuthorPanelElements();
+  if (!authorClose) {
+    return;
+  }
+  if (authorClose.dataset.bound === 'true') {
+    return;
+  }
+  authorClose.dataset.bound = 'true';
+  authorClose.addEventListener('click', (event) => {
+    event.preventDefault();
+    showUserProfilePanel();
+  });
+}
+
+
+function attachAuthorPopupHandlers(popup, pin) {
+  if (!popup) {
+    return;
+  }
+  const popupEl = popup.getElement ? popup.getElement() : null;
+  if (!popupEl) {
+    return;
+  }
+  const trigger = popupEl.querySelector('[data-author-panel-trigger]');
+  if (!trigger) {
+    return;
+  }
+  if (trigger.dataset.authorHandlerBound === 'true') {
+    return;
+  }
+  trigger.dataset.authorHandlerBound = 'true';
+  const handler = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    showAuthorPanel(buildPinAuthorInfo(pin));
+  };
+  trigger.addEventListener('click', handler);
+}
+
+bindAuthorPanelCloseHandler();
 
 function createPopupContent(pin) {
   const category = getCategoryBySlug(pin.category_slug);
@@ -1177,6 +1327,7 @@ function placeCreationMarker(latlng) {
   window.currentCreationMarker = marker;
   marker.addTo(map);
   marker.bindPopup(getCreationPopupContent(latlng), {
+    className: 'creation-popup-wrapper',
     closeOnClick: false,
     autoPan: true,
     keepInView: true,
@@ -1301,7 +1452,7 @@ function updateGuestUserPanels(authenticated) {
   }
 }
 
-function toggleUserPanelExpandedState(expanded) {
+function toggleUserPanelExpandedState(expanded, view = 'profile') {
   const panel = document.querySelector('.user-panel');
   const filterShell = getFilterPanelElement();
   const content = panel?.querySelector('.user-panel__content');
@@ -1312,7 +1463,7 @@ function toggleUserPanelExpandedState(expanded) {
   chips?.classList.toggle('is-hidden', expanded);
   if (expanded) {
     chips?.setAttribute('aria-hidden', 'true');
-    panel?.setAttribute('data-panel-visible', 'profile');
+    panel?.setAttribute('data-panel-visible', view);
   } else {
     chips?.removeAttribute('aria-hidden');
     panel?.removeAttribute('data-panel-visible');
@@ -1590,7 +1741,7 @@ function initProfileSettings() {
      const isView = !isEdit;
     editToggleBtn?.setAttribute('aria-pressed', String(isEdit));
     if (editToggleBtn) {
-      editToggleBtn.innerHTML = isEdit ? 'Вернуться к просмотру' : 'Редактировать профиль';
+      editToggleBtn.innerHTML = isEdit ? 'Назад' : 'Редактировать профиль';
     }
     if (saveBtn) {
       saveBtn.disabled = !isEdit;
@@ -1617,9 +1768,14 @@ function initProfileSettings() {
     }
   };
 
+  const friendsSearchPanel = profileSection?.querySelector('.user-panel__friends.search-panel');
+
   const setProfileMode = (mode) => {
     profileMode = mode;
     const isEdit = mode === 'edit';
+    if (friendsSearchPanel) {
+      friendsSearchPanel.classList.toggle('is-hidden', isEdit);
+    }
     reflectProfileState();
     if (!isEdit) {
       syncProfileSnapshot();
@@ -1990,14 +2146,32 @@ function attachUserPanelMobileShiftHandlers() {
     panel.style.transform = value;
   };
 
-  const handleFocusIn = () => {
-    if (!isMobileViewport()) {
-      return;
+  const shouldShiftForElement = (element) => {
+    if (!(element instanceof Element)) {
+      return false;
     }
+    if (!panel.contains(element)) {
+      return false;
+    }
+    const tagName = element.tagName?.toLowerCase();
+    return ['input', 'textarea', 'select'].includes(tagName);
+  };
+
+  const clearPendingReset = () => {
     if (resetTimeoutId) {
       clearTimeout(resetTimeoutId);
       resetTimeoutId = null;
     }
+  };
+
+  const handleFocusIn = (event) => {
+    if (!isMobileViewport()) {
+      return;
+    }
+    if (!shouldShiftForElement(event.target)) {
+      return;
+    }
+    clearPendingReset();
     setPanelTransform('translateY(-30%)');
   };
 
@@ -2005,13 +2179,14 @@ function attachUserPanelMobileShiftHandlers() {
     if (!isMobileViewport()) {
       return;
     }
+    if (!shouldShiftForElement(event.target)) {
+      return;
+    }
     const nextTarget = event.relatedTarget;
     if (nextTarget instanceof Element && panel.contains(nextTarget)) {
       return;
     }
-    if (resetTimeoutId) {
-      clearTimeout(resetTimeoutId);
-    }
+    clearPendingReset();
     resetTimeoutId = setTimeout(() => {
       setPanelTransform('translateY(0)');
       resetTimeoutId = null;
@@ -2022,16 +2197,22 @@ function attachUserPanelMobileShiftHandlers() {
     if (isMobileViewport()) {
       return;
     }
-    if (resetTimeoutId) {
-      clearTimeout(resetTimeoutId);
-      resetTimeoutId = null;
+    clearPendingReset();
+    setPanelTransform('translateY(0)');
+  };
+
+  const handlePanelPointerDown = () => {
+    if (!isMobileViewport()) {
+      return;
     }
+    clearPendingReset();
     setPanelTransform('translateY(0)');
   };
 
   document.addEventListener('focusin', handleFocusIn);
   document.addEventListener('focusout', handleFocusOut);
   window.addEventListener('resize', handleResize);
+  panel.addEventListener('pointerdown', handlePanelPointerDown);
 }
 
 function copyTextToClipboard(text) {
@@ -2179,15 +2360,20 @@ function addPinToMap(pin) {
       tooltipVisible = false;
     });
   }
-  marker.bindPopup(createPopupContent(pin));
+  marker.bindPopup(createPopupContent(pin), {
+    className: 'pin-popup-wrapper',
+  });
   marker.on('popupopen', () => {
+    collapseDesktopPanels();
     attachCommentHandlers(marker.pinId);
     initializeCommentsView(marker.pinId, marker.pinData?.comments || []);
     startCommentPolling(marker.pinId);
     minimizeFilterPanelForPinPopup();
     centerPinPopupOnMobile(marker.pinId);
+    attachAuthorPopupHandlers(marker.getPopup(), pin);
   });
   marker.on('popupclose', () => {
+    collapseDesktopPanels();
     stopCommentPolling(marker.pinId);
     restoreFilterPanelAfterPinPopup();
   });
@@ -2352,43 +2538,78 @@ window.addEventListener('load', function () {
     }
     if (filterPanel.classList.contains('collapsed')) {
       expandFilterPanel();
-    } else {
-      collapseFilterPanelAnimated();
-    }
-  };
-
-  const handleTouchEnd = (e) => {
-    if (!touchStartY) {
       return;
     }
-    const deltaY = e.changedTouches[0].clientY - touchStartY;
-    const threshold = 15;
-    if (deltaY > threshold) {
+    if (isMobileViewport()) {
       collapseFilterPanelAnimated();
-      restoreFilterPanelAfterCreation();
-    } else if (deltaY < -threshold) {
-      expandFilterPanel();
-      restoreFilterPanelAfterCreation();
+      return;
     }
+    collapseDesktopPanels();
+  };
+
+  const resetPanelHandleTouchState = () => {
     touchStartY = null;
+    panelHandleTouchActive = false;
+    document.removeEventListener('touchend', handlePanelHandleTouchEnd);
+    document.removeEventListener('touchcancel', resetPanelHandleTouchState);
+  };
+
+  const handlePanelHandleTouchEnd = (event) => {
+    if (!panelHandleTouchActive || !touchStartY) {
+      resetPanelHandleTouchState();
+      return;
+    }
+    const touch = event.changedTouches?.[0];
+    if (!touch) {
+      resetPanelHandleTouchState();
+      return;
+    }
+    const deltaY = touch.clientY - touchStartY;
+    if (Math.abs(deltaY) >= PANEL_HANDLE_SWIPE_THRESHOLD) {
+      if (deltaY > 0) {
+        collapseFilterPanelAnimated();
+      } else {
+        expandFilterPanel();
+      }
+    }
+    resetPanelHandleTouchState();
+  };
+
+  const handlePanelHandleTouchStart = (event) => {
+    if (!event.touches || event.touches.length !== 1) {
+      return;
+    }
+    touchStartY = event.touches[0].clientY;
+    panelHandleTouchActive = true;
+    suppressMapCollapseUntil = Date.now() + MAP_COLLAPSE_SUPPRESSION_MS;
+    document.addEventListener('touchend', handlePanelHandleTouchEnd);
+    document.addEventListener('touchcancel', resetPanelHandleTouchState);
   };
 
   if (panelHandleContainer) {
-    panelHandleContainer.addEventListener('click', togglePanel);
+    panelHandleContainer.addEventListener('click', (event) => {
+      if (ignorePanelHandleClick) {
+        ignorePanelHandleClick = false;
+        event.preventDefault();
+        return;
+      }
+      togglePanel();
+    });
     panelHandleContainer.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
         togglePanel();
       }
     });
-    panelHandleContainer.addEventListener('touchstart', (event) => {
-      touchStartY = event.changedTouches[0].clientY;
-    });
-    panelHandleContainer.addEventListener('touchend', handleTouchEnd);
+    panelHandleContainer.addEventListener('touchstart', handlePanelHandleTouchStart, { passive: true });
   }
 
   map.on('click', function (e) {
     logFilterPanelState('map-click-start', { lat: e?.latlng?.lat, lng: e?.latlng?.lng });
+    if (Date.now() < suppressMapCollapseUntil) {
+      return;
+    }
+    collapseDesktopPanels();
     if (window.currentCreationMarker) {
       logFilterPanelState('map-click-with-existing-creation-marker');
       clearCreationMarker();
@@ -2537,8 +2758,15 @@ document.addEventListener('click', function (e) {
       .then((payload) => {
         currentUserVotes.set(pinId, targetValue);
         updatePopupRating(pinId, payload.pin_rating);
-        updateProfileRating(payload.profile_rating);
+        if (typeof payload.profile_rating !== 'undefined') {
+          updateProfileRating(payload.profile_rating);
+        }
         refreshPinPopup(pinId);
+        const entry = getActiveMarkerEntry(pinId);
+        if (entry && entry.pin) {
+          entry.pin.rating = Number.isFinite(payload.pin_rating) ? payload.pin_rating : entry.pin.rating;
+          entry.pinData = { ...entry.pinData, rating: entry.pin.rating };
+        }
       })
       .catch((error) => {
         console.error('Vote failed', error);
