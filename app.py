@@ -41,6 +41,7 @@ from config import (
     CLOUDINARY_AVATAR_FOLDER,
     CLOUDINARY_CLOUD_NAME,
     CLOUDINARY_ENABLED,
+    CLOUDINARY_FORCE_UPLOADS,
     CLOUDINARY_STORAGE_PREFIX,
     CLOUDINARY_URL,
     MAP_DEFAULTS,
@@ -81,6 +82,7 @@ def create_app() -> Flask:
         "api_secret": os.getenv("CLOUDINARY_API_SECRET") or CLOUDINARY_API_SECRET,
     }
     has_creds = all(cloudinary_creds.values())
+    cloudinary_ready = False
 
     if CLOUDINARY_ENABLED and cloudinary:
         try:
@@ -90,12 +92,19 @@ def create_app() -> Flask:
                 cloudinary.config(secure=True, **cloudinary_creds)
             else:
                 raise RuntimeError("Cloudinary credentials are not configured")
+            cloudinary_ready = True
             app.logger.info("Cloudinary storage is enabled for avatars")
         except Exception as exc:  # pragma: no cover - optional external service
+            cloudinary_ready = False
             app.logger.warning(
                 "Failed to configure Cloudinary, fallback to local uploads: %s",
                 exc,
             )
+
+    if CLOUDINARY_FORCE_UPLOADS and not cloudinary_ready:
+        raise RuntimeError(
+            "Cloudinary forced uploads enabled but credentials failed to configure"
+        )
 
     def _ensure_avatar_upload_dir() -> None:
         try:
@@ -480,7 +489,7 @@ def create_app() -> Flask:
         unique_prefix = secrets.token_urlsafe(8)
         unique_name = f"{current_user['nickname']}-{unique_prefix}.{ext}"
         cloudinary_tagged = None
-        cloudinary_available = CLOUDINARY_ENABLED and cloudinary_uploader
+        cloudinary_available = CLOUDINARY_ENABLED and cloudinary_ready and cloudinary_uploader
         if cloudinary_available:
             file.stream.seek(0)
             print("--- ATTEMPTING CLOUDINARY UPLOAD ---")

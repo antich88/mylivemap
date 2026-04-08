@@ -14,6 +14,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = Path(BASE_DIR)
 if load_dotenv:
     load_dotenv(dotenv_path=PROJECT_ROOT / ".env", override=False)
+def _parse_bool_env(value: str | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    return normalized in {"1", "true", "yes", "on"}
 DB_DIR_PATH = os.path.join(BASE_DIR, "data")
 os.makedirs(DB_DIR_PATH, exist_ok=True)
 DB_DIR = Path(DB_DIR_PATH)
@@ -46,6 +51,7 @@ AVATAR_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_AVATAR_FILE_SIZE = int(os.environ.get("MAX_AVATAR_FILE_SIZE", 1_048_576))
 ALLOWED_AVATAR_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+CLOUDINARY_FORCE_UPLOADS = _parse_bool_env(os.getenv("CLOUDINARY_FORCE_UPLOADS"))
 _raw_cloudinary_url = (os.getenv("CLOUDINARY_URL") or "").strip()
 CLOUDINARY_URL = _raw_cloudinary_url or None
 CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
@@ -60,7 +66,9 @@ CLOUDINARY_CREDENTIALS = {
     "api_secret": CLOUDINARY_API_SECRET,
 }
 CLOUDINARY_HAS_BASIC_CREDS = all(CLOUDINARY_CREDENTIALS.values())
-CLOUDINARY_ENABLED = bool(CLOUDINARY_URL or CLOUDINARY_HAS_BASIC_CREDS)
+CLOUDINARY_HAS_CREDENTIALS = bool(CLOUDINARY_URL or CLOUDINARY_HAS_BASIC_CREDS)
+CLOUDINARY_ENABLED_OVERRIDE = _parse_bool_env(os.getenv("CLOUDINARY_ENABLED"))
+CLOUDINARY_ENABLED = CLOUDINARY_FORCE_UPLOADS or CLOUDINARY_ENABLED_OVERRIDE or CLOUDINARY_HAS_CREDENTIALS
 
 MAP_DEFAULTS = {
     "zoom": 13,

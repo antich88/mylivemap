@@ -5,30 +5,34 @@ services:
     plan: free
     region: eu-central-1
     branch: main
-    buildCommand: pip install -r requirements.txt
+    buildCommand: bash render-build.sh
     startCommand: gunicorn app:app
     autoDeploy: true
     healthCheckPath: /health
     envVars:
-      - key: FLASK_ENV
-        value: production
-      - key: APP_MODE
-        value: sqlalchemy
-      - key: DATABASE_URL
-        fromDatabase:
-          name: live-map-db
-          property: connectionString
-      - key: SECRET_KEY
-        # Render автоматически сгенерирует секрет, но его можно переопределить вручную
-        generateValue: true
-      - key: CLOUDINARY_URL
-        value: ""
-      - key: CLOUDINARY_CLOUD_NAME
-        value: ""
-      - key: CLOUDINARY_API_KEY
-        value: ""
-      - key: CLOUDINARY_API_SECRET
-        value: ""
+        - key: FLASK_ENV
+          value: production
+        - key: APP_MODE
+          value: sqlalchemy
+        - key: DATABASE_URL
+          fromDatabase:
+            name: live-map-db
+            property: connectionString
+        - key: SECRET_KEY
+          # Render автоматически сгенерирует секрет, но его можно переопределить вручную
+          generateValue: true
+        - key: CLOUDINARY_URL
+          value: ""
+        - key: CLOUDINARY_CLOUD_NAME
+          value: ""
+        - key: CLOUDINARY_API_KEY
+          value: ""
+        - key: CLOUDINARY_API_SECRET
+          value: ""
+        - key: CLOUDINARY_ENABLED
+          value: "true"
+        - key: CLOUDINARY_FORCE_UPLOADS
+          value: "true"
 databases:
   - name: live-map-db
     plan: free
