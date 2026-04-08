@@ -10,7 +10,12 @@ from typing import Any, Dict, Optional, Tuple
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from config import LOCAL_PROFILES_PATH, LOCAL_USERS_PATH, is_local_mode
-from database import profiles_table, session_scope, users_table
+from database import (
+    profiles_table,
+    session_scope,
+    users_table,
+    user_subscriptions_table,
+)
 
 
 LOCAL_MODE = is_local_mode()
@@ -104,6 +109,7 @@ def _default_profile_payload(nickname: str) -> Dict[str, Any]:
         "avatar_path": None,
         "created_at": timestamp,
         "updated_at": timestamp,
+        "subscriptions": [],
     }
 
 
@@ -125,6 +131,76 @@ def _persist_local_profile(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def _normalize_nickname(nickname: str) -> str:
     return (nickname or "").strip().lower()
+
+
+def get_user_subscriptions(nickname: str) -> List[str]:
+    normalized = _normalize_nickname(nickname)
+    if not normalized:
+        return []
+    if LOCAL_MODE:
+        profile = _local_profile_record(normalized)
+        if not profile:
+            return []
+        return list(profile.get("subscriptions") or [])
+    from sqlalchemy import select
+    with session_scope() as session:
+        stmt = select(user_subscriptions_table.c.author_id).where(
+            user_subscriptions_table.c.follower_id == normalized
+        )
+        return [str(row[0]) for row in session.execute(stmt).scalars().all()]
+
+
+def add_user_subscription(user_nickname: str, author_nickname: str) -> None:
+    user_norm = _normalize_nickname(user_nickname)
+    author_norm = _normalize_nickname(author_nickname)
+    if not user_norm or not author_norm or user_norm == author_norm:
+        return
+    now = datetime.now(timezone.utc)
+    if LOCAL_MODE:
+        profile = get_or_create_user_profile(user_norm)
+        profile = dict(profile)
+        subs = set(profile.get("subscriptions") or [])
+        subs.add(author_norm)
+        profile["subscriptions"] = sorted(subs)
+        profile["updated_at"] = now.isoformat()
+        _persist_local_profile(profile)
+        return
+    from sqlalchemy import insert
+    with session_scope() as session:
+        try:
+            stmt = (
+                insert(user_subscriptions_table)
+                .values(user_id=user_norm, author_nickname=author_norm, created_at=now)
+                .execution_options(synchronize_session=False)
+            )
+            session.execute(stmt)
+        except Exception:
+            session.rollback()
+
+
+def remove_user_subscription(user_nickname: str, author_nickname: str) -> None:
+    user_norm = _normalize_nickname(user_nickname)
+    author_norm = _normalize_nickname(author_nickname)
+    if not user_norm or not author_norm:
+        return
+    if LOCAL_MODE:
+        profile = get_or_create_user_profile(user_norm)
+        profile = dict(profile)
+        subs = set(profile.get("subscriptions") or [])
+        if author_norm in subs:
+            subs.discard(author_norm)
+            profile["subscriptions"] = sorted(subs)
+            profile["updated_at"] = _now_utc().isoformat()
+            _persist_local_profile(profile)
+        return
+    from sqlalchemy import delete
+    with session_scope() as session:
+        stmt = (
+            delete(user_subscriptions_table)
+            .where(user_subscriptions_table.c.user_id == user_norm)
+            .where(user_subscriptions_table.c.author_nickname == author_norm)
+        )
+        session.execute(stmt)
 
 
 def _local_record_to_user(record: Dict[str, Any]) -> AuthUser:
@@ -350,10 +426,10 @@ def get_user_by_nickname(nickname: str) -> Optional[AuthUser]:
                 return _local_record_to_user(record)
         return None
 
-    from sqlalchemy import select
+    from sqlalchemy import select, func
 
     with session_scope() as session:
-        stmt = select(users_table).where(users_table.c.nickname == normalized)
+        stmt = select(users_table).where(func.lower(users_table.c.nickname) == normalized).limit(1)
         row = session.execute(stmt).mappings().first()
     if not row:
         return None

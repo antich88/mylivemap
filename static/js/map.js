@@ -20,6 +20,57 @@ const POPUP_REOPEN_GUARD_MS = 200;
 const COMMENT_MAX_LENGTH = 500;
 const DEBUG_FILTER_PANEL = false;
 const ACTIVE_PINS_CLOCK_INTERVAL = 60_000;
+const SUBSCRIPTION_STORAGE_KEY = 'liveMapSubscribedAuthors';
+let subscriptionsFilterActive = false;
+const subscribedAuthorNicknames = new Set();
+let updateSubscribeButtonState = () => {};
+
+function clearCategorySelections() {
+  activeCategorySlugs.clear();
+  categoryChips.forEach((chip) => {
+    if (chip.dataset.subscribeChip === 'true') {
+      return;
+    }
+    chip.classList.remove('is-active');
+    chip.setAttribute('aria-pressed', 'false');
+  });
+}
+
+function isPinFromSubscribedAuthor(pin) {
+  if (!pin) {
+    return false;
+  }
+  const nickname = pin.author?.nickname || pin.user_id || pin.nickname || '';
+  const normalized = normalizeNicknameForComparison(nickname);
+  return normalized ? subscribedAuthorNicknames.has(normalized) : false;
+}
+
+function setSubscriptionsMode(active, { silent = false } = {}) {
+  if (active === subscriptionsFilterActive) {
+    if (!active && !silent) {
+      updateFiltersUi();
+    }
+    return;
+  }
+  subscriptionsFilterActive = active;
+  if (active) {
+    console.log('--- MODE: Subscriptions Active ---');
+    clearCategorySelections();
+    showAllMode = SHOW_ALL_MODES.OFF;
+    applySubscriptionFilters();
+  }
+  updateSubscribeButtonState();
+  if (silent) {
+    return;
+  }
+  updateFiltersUi();
+}
+let initialSubscriptionsLoaded = false;
+let subscriptions = [];
+let subscriptionsSectionEl = null;
+let subscriptionsListEl = null;
+let subscriptionsCountEl = null;
+let authorPanelCurrentNickname = '';
 
 window.currentCreationMarker = null;
 window.userLocationMarker = null;
@@ -53,6 +104,12 @@ let ignorePanelHandleClick = false;
 const VOTE_DIRECTION_VALUES = {
   up: 1,
   down: -1,
+};
+const PROFILE_BUTTON_STATES = {
+  PROFILE: 'profile',
+  AUTHOR: 'author',
+  AUTH: 'auth',
+  COLLAPSED: 'collapsed',
 };
 let currentUserVotes = new Map();
 const voteInFlightPins = new Set();
@@ -373,6 +430,9 @@ function syncCategoryChipsWithActiveSet() {
     return;
   }
   categoryChips.forEach((chip) => {
+    if (chip.dataset.subscribeChip === 'true') {
+      return;
+    }
     const slug = chip.dataset.categorySlug;
     const isActive = slug ? activeCategorySlugs.has(slug) : false;
     chip.classList.toggle('is-active', isActive);
@@ -628,7 +688,7 @@ function restoreOpenPinPopupState(state) {
   });
 }
 
-function renderPinAuthorIntro(pin) {
+function renderPinAuthorIntro(pin, isSelf = false) {
   const author = pin.author || {};
   const nickname = author.nickname || pin.user_id || pin.nickname || 'Автор';
   const safeNickname = escapeHtml(nickname);
@@ -644,7 +704,12 @@ function renderPinAuthorIntro(pin) {
       </div>
       <div class="pin-popup__author-info">
         <span class="pin-popup__author-label">Автор</span>
-        <button type="button" class="pin-popup__author-nickname-btn" data-author-panel-trigger>
+        <button
+          type="button"
+          class="pin-popup__author-nickname-btn"
+          data-author-panel-trigger
+          data-author-self="${isSelf ? 'true' : 'false'}"
+        >
           <span class="pin-popup__author-nickname">${safeNickname}</span>
         </button>
       </div>
@@ -657,7 +722,9 @@ function buildPinAuthorInfo(pin) {
   const nickname = author.nickname || pin.user_id || pin.nickname || 'Автор';
   const avatar_url = author.avatar_url || pin.avatar_url || '';
   const rating_total = typeof author.rating_total === 'number' ? author.rating_total : null;
-  return { nickname, avatar_url, rating_total };
+  const age = typeof author.age === 'number' ? author.age : null;
+  const gender = typeof author.gender === 'string' ? author.gender : null;
+  return { nickname, avatar_url, rating_total, age, gender };
 }
 
 function getAuthorPanelElements() {
@@ -672,8 +739,20 @@ function getAuthorPanelElements() {
     authorAvatar: panel.querySelector('[data-author-avatar]'),
     authorName: panel.querySelector('[data-author-name]'),
     authorRating: panel.querySelector('[data-author-rating]'),
+    authorAge: panel.querySelector('[data-author-age]'),
+    authorGender: panel.querySelector('[data-author-gender]'),
     authorClose: panel.querySelector('[data-author-action="close"]'),
   };
+}
+
+function syncAuthorCloseButtonLabel() {
+  const closeBtn = document.querySelector('[data-author-action="close"]');
+  if (!closeBtn) {
+    return;
+  }
+  const authLabel = closeBtn.dataset.authorCloseAuth || '← Назад к профилю';
+  const guestLabel = closeBtn.dataset.authorCloseGuest || '← Назад';
+  closeBtn.textContent = isAuthenticated() ? authLabel : guestLabel;
 }
 
 function formatAuthorRating(value) {
@@ -684,6 +763,29 @@ function formatAuthorRating(value) {
     return value;
   }
   return '—';
+}
+
+function formatAuthorAge(value) {
+  if (value === null || value === undefined || value === '') {
+    return '—';
+  }
+  if (Number.isFinite(value)) {
+    return String(value);
+  }
+  const coercedNumber = Number(value);
+  if (!Number.isNaN(coercedNumber)) {
+    return String(coercedNumber);
+  }
+  const normalized = String(value).trim();
+  return normalized.length ? normalized : '—';
+}
+
+function formatAuthorGender(value) {
+  if (!value) {
+    return '—';
+  }
+  const normalized = String(value).trim().toUpperCase();
+  return PROFILE_GENDER_LABELS[normalized] || '—';
 }
 
 function renderAuthorAvatar(author) {
@@ -708,15 +810,97 @@ function renderAuthorAvatar(author) {
   }
 }
 
+function normalizeNicknameForComparison(nickname) {
+  return (nickname || '').trim().toLowerCase();
+}
+
+function resolveAuthorPanelNickname(author) {
+  if (!author) {
+    return '';
+  }
+  return (author.nickname || author.authorNick || author.user_id || '').trim();
+}
+
+function isNicknameSubscribed(nickname) {
+  const normalized = normalizeNicknameForComparison(nickname);
+  return normalized ? subscribedAuthorNicknames.has(normalized) : false;
+}
+
+function refreshAuthorPanelSubscribeButtonState() {
+  const subscribeBtn = document.querySelector('.author-panel__subscribe-btn');
+  if (!subscribeBtn) {
+    return;
+  }
+  const subscribed = isNicknameSubscribed(authorPanelCurrentNickname);
+  subscribeBtn.textContent = subscribed ? 'Отписаться' : 'Подписаться';
+  subscribeBtn.classList.toggle('author-panel__subscribe-btn--active', subscribed);
+  subscribeBtn.dataset.authorSubscribed = subscribed ? 'true' : 'false';
+}
+
+function toggleAuthorPanelSubscription() {
+  const nickname = (authorPanelCurrentNickname || '').trim();
+  if (!nickname) {
+    return;
+  }
+  const subscribed = isNicknameSubscribed(nickname);
+  const url = subscribed ? `/api/subscriptions/${encodeURIComponent(nickname)}` : '/api/subscriptions';
+  const options = {
+    method: subscribed ? 'DELETE' : 'POST',
+    credentials: 'same-origin',
+  };
+  if (!subscribed) {
+    options.headers = { 'Content-Type': 'application/json' };
+    options.body = JSON.stringify({ author_nickname: nickname });
+  }
+  fetch(url, options)
+    .then(handleJsonResponse)
+    .then(() => {
+      showUserToast(subscribed ? `Подписка на ${nickname} отменена.` : `Вы подписались на ${nickname}.`);
+      return fetchSubscriptions();
+    })
+    .then(() => {
+      applySubscriptionFilters();
+      refreshAuthorPanelSubscribeButtonState();
+    })
+    .catch((error) => {
+      showUserToast(error.message || (subscribed ? 'Не удалось отменить подписку.' : 'Не удалось подписаться.'));
+    });
+}
+
 function updateAuthorPanelContent(author) {
-  const { authorName, authorRating } = getAuthorPanelElements();
+  const { authorName, authorRating, authorAge, authorGender } = getAuthorPanelElements();
   if (authorName) {
     authorName.textContent = author.nickname || 'Автор';
   }
   if (authorRating) {
     authorRating.textContent = formatAuthorRating(author.rating_total);
   }
+  if (authorAge) {
+    authorAge.textContent = formatAuthorAge(author.age);
+  }
+  if (authorGender) {
+    authorGender.textContent = formatAuthorGender(author.gender);
+  }
   renderAuthorAvatar(author);
+}
+
+function bindAuthorPanelSubscribeButton(author) {
+  const authorSubscribeBtn = document.querySelector('.author-panel__subscribe-btn');
+  if (!authorSubscribeBtn) {
+    return;
+  }
+  authorPanelCurrentNickname = resolveAuthorPanelNickname(author);
+  const handleSubscribeClick = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleAuthorPanelSubscription();
+  };
+  if (authorSubscribeBtn.__authorSubscribeHandler) {
+    authorSubscribeBtn.removeEventListener('click', authorSubscribeBtn.__authorSubscribeHandler);
+  }
+  authorSubscribeBtn.__authorSubscribeHandler = handleSubscribeClick;
+  authorSubscribeBtn.addEventListener('click', handleSubscribeClick);
+  refreshAuthorPanelSubscribeButtonState();
 }
 
 function showAuthorPanel(author) {
@@ -724,11 +908,14 @@ function showAuthorPanel(author) {
   if (!panel || !authorView || !userContent) {
     return;
   }
+  expandFilterPanel();
   updateAuthorPanelContent(author);
+  renderAuthorActivePinsList(author.nickname || '');
   authorView.classList.remove('is-hidden');
   userContent.classList.add('is-hidden');
   panel.setAttribute('data-panel-visible', 'author');
   toggleUserPanelExpandedState(true, 'author');
+  bindAuthorPanelSubscribeButton(author);
 }
 
 function showUserProfilePanel() {
@@ -739,7 +926,22 @@ function showUserProfilePanel() {
   authorView?.classList.add('is-hidden');
   userContent.classList.remove('is-hidden');
   panel.setAttribute('data-panel-visible', 'profile');
+  expandFilterPanel();
   toggleUserPanelExpandedState(true, 'profile');
+}
+
+function showGuestAuthPanel() {
+  const { panel, authorView, userContent } = getAuthorPanelElements();
+  if (!panel || !authorView || !userContent) {
+    return;
+  }
+  authorView.classList.add('is-hidden');
+  userContent.classList.add('is-hidden');
+  panel.setAttribute('data-panel-visible', 'auth');
+  expandFilterPanel();
+  toggleUserPanelExpandedState(true, 'auth');
+  setAuthPanelVisibility(true);
+  syncAuthorCloseButtonLabel();
 }
 
 function bindAuthorPanelCloseHandler() {
@@ -753,8 +955,16 @@ function bindAuthorPanelCloseHandler() {
   authorClose.dataset.bound = 'true';
   authorClose.addEventListener('click', (event) => {
     event.preventDefault();
+    if (!isAuthenticated()) {
+      showGuestAuthPanel();
+      return;
+    }
     showUserProfilePanel();
   });
+}
+
+function handleAuthStateChangeForCloseButton(event) {
+  syncAuthorCloseButtonLabel();
 }
 
 
@@ -766,20 +976,49 @@ function attachAuthorPopupHandlers(popup, pin) {
   if (!popupEl) {
     return;
   }
-  const trigger = popupEl.querySelector('[data-author-panel-trigger]');
-  if (!trigger) {
-    return;
+  const triggers = popupEl.querySelectorAll('[data-author-panel-trigger]');
+  triggers.forEach((trigger) => {
+    if (trigger.dataset.authorHandlerBound === 'true') {
+      return;
+    }
+    trigger.dataset.authorHandlerBound = 'true';
+    trigger.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const isSelfTrigger = trigger.dataset.authorSelf === 'true';
+      if (isSelfTrigger) {
+        showUserProfilePanel();
+        return;
+      }
+      showAuthorPanel(buildPinAuthorInfo(pin));
+    });
+  });
+
+  const subscribeBtn = popupEl.querySelector('.author-panel__subscribe-btn');
+  if (subscribeBtn) {
+    subscribeBtn.dataset.authorSubscribe = 'true';
+    subscribeBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      const nickname = pin.author?.nickname || buildPinAuthorInfo(pin).nickname;
+      if (!nickname) {
+        return;
+      }
+      fetch('/api/subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ author_nickname: nickname }),
+      })
+        .then(handleJsonResponse)
+        .then(() => {
+          showUserToast(`Вы подписались на ${nickname}.`);
+          fetchSubscriptions().then(() => applySubscriptionFilters());
+        })
+        .catch((error) => {
+          showUserToast(error.message || 'Не удалось подписаться.');
+        });
+    });
   }
-  if (trigger.dataset.authorHandlerBound === 'true') {
-    return;
-  }
-  trigger.dataset.authorHandlerBound = 'true';
-  const handler = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    showAuthorPanel(buildPinAuthorInfo(pin));
-  };
-  trigger.addEventListener('click', handler);
 }
 
 bindAuthorPanelCloseHandler();
@@ -792,15 +1031,25 @@ function createPopupContent(pin) {
     ? `<button class="delete-pin delete-pin-btn" data-pin-id="${pin.id}">Удалить</button>`
     : '';
   const shareUrl = new URL(`/pin/${pin.shared_token}`, window.location.origin).href;
-  const authorIntroMarkup = renderPinAuthorIntro(pin);
+  const authorIntroMarkup = renderPinAuthorIntro(pin, isAuthor);
   const voteControlsMarkup = renderVoteControls(pin);
   const commentsList = renderCommentsList(pin.comments || [], currentNickname, pin.id);
   const commentForm = renderCommentForm(currentNickname, pin.id);
+  const authorTitleMarkup = `
+    <button
+      type="button"
+      class="pin-popup__author-nickname-btn pin-popup__title-trigger"
+      data-author-panel-trigger
+      data-author-self="${isAuthor ? 'true' : 'false'}"
+    >
+      <strong>${escapeHtml(pin.nickname || 'Метка')}</strong>
+    </button>
+  `;
 
   return `
     <div class="pin-popup" data-pin-id="${pin.id}">
       ${authorIntroMarkup}
-      <strong>${pin.nickname}</strong>
+      ${authorTitleMarkup}
       <p class="pin-popup__category">${category?.icon ?? ''} ${category?.label ?? 'Категория'}</p>
       <p>${pin.description}</p>
       <div class="pin-popup__meta">
@@ -1139,6 +1388,23 @@ function getActivePinsCountElement() {
   return section.querySelector('[data-active-pins-count]');
 }
 
+function getAuthorActivePinsListElement() {
+  return document.querySelector('[data-author-active-pins-list]');
+}
+
+function getAuthorActivePinsCountElement() {
+  return document.querySelector('[data-author-active-pins-count]');
+}
+
+function getActivePinsByNickname(nickname) {
+  if (!nickname) {
+    return [];
+  }
+  return activeMarkers
+    .map(({ pin }) => pin)
+    .filter((pin) => pin.user_id && pin.user_id === nickname);
+}
+
 function getCurrentUserPins() {
   const nickname = currentAuthUser?.nickname;
   if (!nickname) {
@@ -1175,6 +1441,21 @@ function createActivePinMarkup(pin) {
   `;
 }
 
+function createAuthorActivePinMarkup(pin) {
+  const title = escapeHtml(pin.nickname || 'Метка');
+  const meta = getActivePinText(pin);
+  return `
+    <article class="user-panel__active-pin author-panel__active-pin" data-author-pin-id="${pin.id}">
+      <a class="user-panel__active-pin-title" href="#" data-author-active-pin-link data-pin-id="${pin.id}">
+        ${title}
+      </a>
+      <div class="user-panel__active-pin-meta">
+        <span>${meta}</span>
+      </div>
+    </article>
+  `;
+}
+
 function renderActivePinsList() {
   const listEl = getActivePinsListElement();
   const countEl = getActivePinsCountElement();
@@ -1194,6 +1475,189 @@ function renderActivePinsList() {
     return;
   }
   listEl.innerHTML = pins.map((pin) => createActivePinMarkup(pin)).join('');
+}
+
+function renderAuthorActivePinsList(nickname) {
+  const listEl = getAuthorActivePinsListElement();
+  const countEl = getAuthorActivePinsCountElement();
+  if (!listEl || !countEl) {
+    return;
+  }
+  const pins = getActivePinsByNickname(nickname);
+  countEl.textContent = `${pins.length}/${USER_MARKER_LIMIT}`;
+  if (!pins.length) {
+    listEl.innerHTML = '<p class="user-panel__active-pins-empty">Активных точек пока нет.</p>';
+    return;
+  }
+  listEl.innerHTML = pins.map((pin) => createAuthorActivePinMarkup(pin)).join('');
+  listEl.querySelectorAll('[data-author-active-pin-link]').forEach((link) => {
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+      const pinId = Number(link.dataset.pinId);
+      if (pinId) {
+        focusPinFromList(pinId);
+      }
+    });
+  });
+}
+
+function ensureSubscriptionElements() {
+  if (!subscriptionsSectionEl || !subscriptionsListEl || !subscriptionsCountEl) {
+    subscriptionsSectionEl = document.querySelector('[data-subscriptions-section]');
+    subscriptionsListEl = document.querySelector('[data-subscriptions-list]');
+    subscriptionsCountEl = document.querySelector('[data-subscriptions-count]');
+  }
+  return { subscriptionsSectionEl, subscriptionsListEl, subscriptionsCountEl };
+}
+
+function renderSubscriptionsList() {
+  const container = document.getElementById('subscriptions-list');
+  if (container) {
+    container.className = '';
+  }
+  const { subscriptionsListEl, subscriptionsCountEl } = ensureSubscriptionElements();
+  if (!subscriptionsListEl || !subscriptionsCountEl) {
+    return;
+  }
+  subscriptionsListEl.style.background = 'transparent';
+  const count = subscriptions.length;
+  subscriptionsCountEl.textContent = String(count);
+  if (!count) {
+    subscriptionsListEl.innerHTML = '<p class="user-panel__subscriptions-empty">Пока нет подписок.</p>';
+    return;
+  }
+  console.log('--- СУПЕР-ЧИСТКА JS v5 ---');
+  subscriptionsListEl.innerHTML = '';
+  const fragment = document.createDocumentFragment();
+  subscriptions.forEach((subscription) => {
+    const nickname = (subscription?.nickname || '').trim();
+    if (!nickname) {
+      return;
+    }
+    const safeNickname = escapeHtml(nickname);
+    const letter = safeNickname.charAt(0).toUpperCase() || 'A';
+    const avatarUrl = subscription?.avatar_url ? escapeHtml(subscription.avatar_url) : '';
+
+    const item = document.createElement('div');
+    item.dataset.subscriptionCard = '';
+    item.dataset.authorNickname = safeNickname;
+    item.style.cssText = 'display:flex !important; flex-direction:row !important; align-items:center !important; height:48px !important; background:rgba(255,255,255,0.05) !important; margin-bottom:8px !important; padding:0 10px !important; border-radius:10px !important; width:100% !important;';
+
+    const link = document.createElement('a');
+    link.href = '#';
+    link.dataset.subscriptionCardLink = '';
+    link.dataset.authorNickname = safeNickname;
+    link.className = 'subscription-card__body';
+
+    const avatarWrapper = document.createElement('span');
+    avatarWrapper.className = 'subscription-card__avatar';
+    avatarWrapper.style.cssText = 'width:42px !important; height:42px !important; border-radius:50% !important; flex-shrink:0 !important; margin-right:12px !important; overflow:hidden !important;';
+
+    if (avatarUrl) {
+      const avatarImg = document.createElement('img');
+      avatarImg.src = avatarUrl;
+      avatarImg.alt = `Аватар ${safeNickname}`;
+      avatarImg.loading = 'lazy';
+      avatarImg.style.cssText = 'width:100% !important; height:100% !important; border-radius:50% !important; flex-shrink:0 !important; object-fit:cover !important; margin:0 !important;';
+      avatarWrapper.appendChild(avatarImg);
+    } else {
+      const placeholder = document.createElement('span');
+      placeholder.className = 'subscription-card__avatar-placeholder';
+      placeholder.setAttribute('aria-hidden', 'true');
+      placeholder.textContent = letter;
+      avatarWrapper.appendChild(placeholder);
+    }
+
+    const info = document.createElement('div');
+    info.className = 'subscription-card__info';
+    const nicknameSpan = document.createElement('span');
+    nicknameSpan.className = 'subscription-card__nickname';
+    nicknameSpan.textContent = safeNickname;
+    info.appendChild(nicknameSpan);
+
+    link.append(avatarWrapper, info);
+    item.appendChild(link);
+    fragment.appendChild(item);
+  });
+  subscriptionsListEl.appendChild(fragment);
+}
+
+function applySubscriptionFilters() {
+  subscribedAuthorNicknames.clear();
+  subscriptions.forEach((subscription) => {
+    const normalized = (subscription?.nickname || '').trim().toLowerCase();
+    if (normalized) {
+      subscribedAuthorNicknames.add(normalized);
+    }
+  });
+  const matchedSubscriptions = activeMarkers.filter(({ pin }) => isPinFromSubscribedAuthor(pin)).length;
+  console.debug('[subscriptions] applySubscriptionFilters', { matchedSubscriptions, subscriptionsLoaded: subscriptions.length });
+}
+
+function fetchSubscriptions() {
+  if (!isAuthenticated()) {
+    subscriptions = [];
+    renderSubscriptionsList();
+    return Promise.resolve();
+  }
+  return fetch('/api/subscriptions', { credentials: 'same-origin' })
+    .then(handleJsonResponse)
+    .then((payload) => {
+      subscriptions = Array.isArray(payload?.subscriptions) ? payload.subscriptions : [];
+      renderSubscriptionsList();
+      applySubscriptionFilters();
+      refreshAuthorPanelSubscribeButtonState();
+      initialSubscriptionsLoaded = true;
+    })
+    .catch((error) => {
+      console.error('Не удалось загрузить подписки', error);
+      subscriptions = [];
+      renderSubscriptionsList();
+      applySubscriptionFilters();
+      refreshAuthorPanelSubscribeButtonState();
+      initialSubscriptionsLoaded = true;
+    });
+}
+
+function unsubscribeFromAuthor(nickname) {
+  if (!nickname) {
+    return;
+  }
+  const normalized = nickname.trim();
+  if (!normalized) {
+    return;
+  }
+  fetch(`/api/subscriptions/${encodeURIComponent(normalized)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  })
+    .then(handleJsonResponse)
+    .then(() => {
+      showUserToast(`Подписка на ${normalized} отменена.`);
+      fetchSubscriptions();
+    })
+    .catch((error) => {
+      showUserToast(error.message || 'Не удалось отменить подписку.');
+    });
+}
+
+function openAuthorFromSubscription(nickname) {
+  const safeNickname = (nickname || '').trim();
+  if (!safeNickname) {
+    return;
+  }
+  fetch(`/api/authors/${encodeURIComponent(safeNickname)}`, { credentials: 'same-origin' })
+    .then(handleJsonResponse)
+    .then((payload) => {
+      const author = payload?.author;
+      if (!author) {
+        throw new Error('Данные автора не найдены.');
+      }
+      showAuthorPanel(author);
+    })
+    .catch((error) => {
+      showUserToast(error.message || 'Не удалось открыть профиль автора.');
+    });
 }
 
 function handleActivePinsListClick(event) {
@@ -1468,6 +1932,24 @@ function toggleUserPanelExpandedState(expanded, view = 'profile') {
     chips?.removeAttribute('aria-hidden');
     panel?.removeAttribute('data-panel-visible');
   }
+  if (expanded) {
+    updateProfileModeButtonVisibility(view);
+  } else {
+    updateProfileModeButtonVisibility(PROFILE_BUTTON_STATES.COLLAPSED);
+  }
+}
+
+function updateProfileModeButtonVisibility(mode) {
+  const button = document.querySelector('.profile-mode-btn');
+  if (!button) {
+    return;
+  }
+  console.log('--- FIX: Profile Button State ---', mode);
+  if (mode === PROFILE_BUTTON_STATES.PROFILE) {
+    button.style.setProperty('display', 'block', 'important');
+  } else {
+    button.style.setProperty('display', 'none', 'important');
+  }
 }
 
 function syncAuthToggleAppearance() {
@@ -1581,6 +2063,7 @@ function emitProfileAuthEvent(detail = {}) {
 function renderAuthState(message = '') {
   const { statusEl, authForm, logoutBtn, switchLink, switchText, authTitle, messageEl, panelEl } = getAuthElements();
   const authenticated = isAuthenticated();
+  updateProfileToggleButtonPresence(authenticated);
   const previousAuthenticated = Boolean(renderAuthState.previousAuthenticated);
   const justLoggedIn = authenticated && !previousAuthenticated;
   const nickname = currentAuthUser?.nickname || '';
@@ -1632,6 +2115,7 @@ function renderAuthState(message = '') {
   renderActivePinsList();
   bindActivePinsActions();
   if (authenticated) {
+    fetchSubscriptions();
     startActivePinsClock();
     if (justLoggedIn) {
       expandFilterPanel();
@@ -1641,6 +2125,32 @@ function renderAuthState(message = '') {
     stopActivePinsClock();
   }
   renderAuthState.previousAuthenticated = authenticated;
+  syncAuthorCloseButtonLabel();
+}
+
+function updateProfileToggleButtonPresence(authenticated) {
+  const slot = document.querySelector('[data-profile-action-slot="toggle-edit"]');
+  if (!slot) {
+    return;
+  }
+  const existingButton = slot.querySelector('[data-profile-action="toggle-edit"]');
+  if (authenticated) {
+    if (existingButton) {
+      return;
+    }
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'profile-mode-btn';
+    button.dataset.profileAction = 'toggle-edit';
+    button.dataset.profileViewOnly = '';
+    button.setAttribute('aria-pressed', 'false');
+    button.textContent = 'Редактировать профиль';
+    slot.appendChild(button);
+    return;
+  }
+  if (existingButton) {
+    existingButton.remove();
+  }
 }
 
 function initProfileSettings() {
@@ -1652,7 +2162,6 @@ function initProfileSettings() {
   const avatarPlaceholder = avatarPreview?.querySelector('.profile-avatar__placeholder');
   const avatarImg = avatarPreview?.querySelector('img');
   const avatarUploadBtn = document.querySelector('[data-profile-action="upload-avatar"]');
-  const editToggleBtn = document.querySelector('[data-profile-action="toggle-edit"]');
   const cancelBtn = document.querySelector('[data-profile-action="cancel"]');
   const saveBtn = document.querySelector('[data-profile-action="save"]');
   const passwordToggleBtn = document.querySelector('[data-password-action="toggle"]');
@@ -1662,6 +2171,7 @@ function initProfileSettings() {
   const profileViewNicknameEl = document.getElementById('profile-view-nickname');
   const profileViewAgeEl = document.getElementById('profile-view-age');
   const profileViewGenderEl = document.getElementById('profile-view-gender');
+  const profileToggleSlot = profileSection?.querySelector('[data-profile-action-slot="toggle-edit"]');
   if (!profileSection || !profileForm) {
     return;
   }
@@ -1735,10 +2245,13 @@ function initProfileSettings() {
     }
   };
 
+  const getToggleButton = () => profileSection.querySelector('[data-profile-action="toggle-edit"]');
+
   const reflectProfileState = () => {
      profileSection.dataset.profileMode = profileMode;
     const isEdit = profileMode === 'edit';
      const isView = !isEdit;
+    const editToggleBtn = getToggleButton();
     editToggleBtn?.setAttribute('aria-pressed', String(isEdit));
     if (editToggleBtn) {
       editToggleBtn.innerHTML = isEdit ? 'Назад' : 'Редактировать профиль';
@@ -1769,19 +2282,111 @@ function initProfileSettings() {
   };
 
   const friendsSearchPanel = profileSection?.querySelector('.user-panel__friends.search-panel');
+  const friendSearchInput = document.getElementById('friend-search-input');
+  const friendSearchBtn = document.getElementById('friend-search-btn');
+  const friendSearchResults = document.getElementById('search-results');
 
-  const setProfileMode = (mode) => {
-    profileMode = mode;
-    const isEdit = mode === 'edit';
-    if (friendsSearchPanel) {
-      friendsSearchPanel.classList.toggle('is-hidden', isEdit);
+  const resetFriendSearchMessages = () => {
+    if (!friendSearchResults) {
+      return;
     }
-    reflectProfileState();
-    if (!isEdit) {
-      syncProfileSnapshot();
-      setPasswordState('collapsed');
+    friendSearchResults.textContent = '';
+    friendSearchResults.classList.add('is-hidden');
+    friendSearchResults.classList.remove('search-results--error', 'search-results--success');
+  };
+
+  const renderFriendSearchMessage = (message, type = 'info') => {
+    if (!friendSearchResults) {
+      return;
+    }
+    friendSearchResults.textContent = message;
+    friendSearchResults.classList.remove('search-results--error', 'search-results--success');
+    friendSearchResults.classList.toggle('search-results--error', type === 'error');
+    friendSearchResults.classList.toggle('search-results--success', type === 'success');
+    friendSearchResults.classList.remove('is-hidden');
+  };
+
+  const getAuthorByNickname = (nickname) => {
+    const safeNickname = (nickname || '').trim();
+    if (!safeNickname) {
+      return Promise.reject(new Error('Введите никнейм для поиска.'));
+    }
+    return fetch(`/api/authors/${encodeURIComponent(safeNickname)}`, { credentials: 'same-origin' })
+      .then(async (response) => {
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          const errorMessage = payload?.message || 'Не удалось найти автора.';
+          throw new Error(errorMessage);
+        }
+        const payload = await response.json().catch(() => ({}));
+        if (!payload?.author) {
+          throw new Error('Данные автора не найдены.');
+        }
+        return payload.author;
+      });
+  };
+
+  const handleFriendSearch = () => {
+    if (!friendSearchInput) {
+      return;
+    }
+    const nickname = friendSearchInput.value.trim();
+    resetFriendSearchMessages();
+    if (!nickname) {
+      renderFriendSearchMessage('Введите никнейм, чтобы найти автора.', 'error');
+      friendSearchInput.focus();
+      return;
+    }
+    if (friendSearchBtn) {
+      friendSearchBtn.disabled = true;
+    }
+    getAuthorByNickname(nickname)
+      .then((author) => {
+        renderFriendSearchMessage(`Панель автора ${author.nickname || nickname} открыта.`, 'success');
+        showAuthorPanel(author);
+      })
+      .catch((error) => {
+        renderFriendSearchMessage(error.message || 'Автор не найден.', 'error');
+      })
+      .finally(() => {
+        if (friendSearchBtn) {
+          friendSearchBtn.disabled = false;
+        }
+      });
+  };
+
+  const bindFriendSearchHandlers = () => {
+    if (friendSearchBtn) {
+      friendSearchBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        handleFriendSearch();
+      });
+    }
+    if (friendSearchInput) {
+      friendSearchInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          handleFriendSearch();
+        }
+      });
+      friendSearchInput.addEventListener('input', () => {
+        resetFriendSearchMessages();
+      });
     }
   };
+
+    const setProfileMode = (mode) => {
+      profileMode = mode;
+      const isEdit = mode === 'edit';
+      if (friendsSearchPanel) {
+        friendsSearchPanel.classList.toggle('is-hidden', isEdit);
+      }
+      reflectProfileState();
+      if (!isEdit) {
+        syncProfileSnapshot();
+        setPasswordState('collapsed');
+      }
+    };
 
   resetProfileToViewMode = () => setProfileMode('view');
 
@@ -1902,7 +2507,11 @@ function initProfileSettings() {
       });
   };
 
-  editToggleBtn?.addEventListener('click', () => {
+  profileToggleSlot?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-profile-action="toggle-edit"]');
+    if (!button) {
+      return;
+    }
     const isEdit = profileSection.dataset.profileMode === 'edit';
     setProfileMode(isEdit ? 'view' : 'edit');
   });
@@ -1912,9 +2521,9 @@ function initProfileSettings() {
     submitProfileForm();
   });
 
-  cancelBtn?.addEventListener('click', () => {
-    setProfileMode('view');
-  });
+    cancelBtn?.addEventListener('click', () => {
+      setProfileMode('view');
+    });
 
   passwordToggleBtn?.addEventListener('click', () => {
       const currentState = document.querySelector('.password-collapse')?.dataset.passwordState || 'collapsed';
@@ -1935,12 +2544,14 @@ function initProfileSettings() {
     avatarInput?.click();
   });
 
-  avatarInput?.addEventListener('change', (event) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      uploadAvatar(file);
-    }
-  });
+    avatarInput?.addEventListener('change', (event) => {
+      const file = event.target.files?.[0];
+      if (file) {
+        uploadAvatar(file);
+      }
+    });
+
+    bindFriendSearchHandlers();
 
   document.addEventListener('profile:auth-state-changed', (event) => {
     const { authenticated, user } = event.detail || {};
@@ -2397,6 +3008,13 @@ function updateCounters() {
       counter.textContent = counts[slug] || '0';
     }
   });
+  const subscribedMarkers = activeMarkers.filter(({ pin }) => isPinFromSubscribedAuthor(pin)).length;
+  counts.subscriptions = subscribedMarkers;
+  const subscribeCountEl = document.querySelector('.subscribe-btn__count');
+  if (subscribeCountEl) {
+    subscribeCountEl.textContent = String(subscribedMarkers);
+  }
+  console.debug('[subscriptions] updateCounters', { totalMarkers: activeMarkers.length, subscribedMarkers });
   renderActivePinsList();
 }
 
@@ -2460,7 +3078,7 @@ function removePinFromMap(pinId) {
 
 function applyCategoryFilters() {
   activeMarkers.forEach(({ marker, pin }) => {
-    const shouldShow = activeCategorySlugs.has(pin.category_slug);
+    const shouldShow = subscriptionsFilterActive ? isPinFromSubscribedAuthor(pin) : activeCategorySlugs.has(pin.category_slug);
     const isOnMap = map.hasLayer(marker);
     if (shouldShow && !isOnMap) {
       marker.addTo(map);
@@ -2518,7 +3136,7 @@ window.addEventListener('load', function () {
     geolocateBtn.setAttribute('aria-label', 'Центровать на меня');
     geolocateBtn.innerHTML = `
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3.5l4.5 7.8-4.5 7.7-4.5-7.7L12 3.5z" />
+        <path d="M12 2l7 20-7-6-7 6z" />
       </svg>
     `;
     L.DomEvent.on(geolocateBtn, 'click', L.DomEvent.stopPropagation);
@@ -2639,7 +3257,7 @@ window.addEventListener('load', function () {
     placeCreationMarker(e.latlng);
   });
 
-  const resetBtn = document.getElementById('reset-btn');
+let subscribeToggleBtn = document.getElementById('subscribe-toggle-btn');
 
   categoryChips = Array.from(document.querySelectorAll('.category-chip'));
   categoryChips.forEach((chip) => {
@@ -2651,7 +3269,11 @@ window.addEventListener('load', function () {
       if (!slug) {
         return;
       }
-      if (activeCategorySlugs.has(slug)) {
+      if (subscriptionsFilterActive) {
+        setSubscriptionsMode(false, { silent: true });
+      }
+      const wasActive = activeCategorySlugs.has(slug);
+      if (wasActive) {
         activeCategorySlugs.delete(slug);
       } else {
         activeCategorySlugs.add(slug);
@@ -2661,15 +3283,44 @@ window.addEventListener('load', function () {
     });
   });
 
-  if (resetBtn) {
-    resetBtn.addEventListener('click', () => {
-      if (activeCategorySlugs.size === 0) {
-        return;
-      }
-      deactivateAllCategories();
-      showAllMode = SHOW_ALL_MODES.OFF;
-      updateFiltersUi();
-    });
+  let subscribeChip = subscribeToggleBtn;
+  if (!subscribeChip) {
+    const chipContainer = document.querySelector('.category-chips');
+    if (chipContainer) {
+      subscribeChip = document.createElement('button');
+      subscribeChip.id = 'subscribe-toggle-btn';
+      subscribeChip.className = 'category-chip subscribe-btn';
+      subscribeChip.dataset.subscribeChip = 'true';
+      subscribeChip.dataset.categorySlug = 'subscriptions';
+      subscribeChip.type = 'button';
+      subscribeChip.setAttribute('aria-pressed', 'false');
+      subscribeChip.innerHTML = `
+        <span class="category-chip__icon" aria-hidden="true">👤</span>
+        <span class="category-chip__label">Подписки</span>
+        <span class="category-count">0</span>
+      `;
+      chipContainer.appendChild(subscribeChip);
+      categoryChips.push(subscribeChip);
+      subscribeToggleBtn = subscribeChip;
+    }
+  }
+
+  if (subscribeToggleBtn) {
+    updateSubscribeButtonState = () => {
+      const activeState = subscriptionsFilterActive;
+      subscribeToggleBtn.setAttribute('aria-pressed', String(activeState));
+      subscribeToggleBtn.classList.toggle('is-active', activeState);
+    };
+
+    const handleSubscribeToggleClick = (event) => {
+      event.preventDefault();
+      const nextState = !subscriptionsFilterActive;
+      setSubscriptionsMode(nextState);
+      updateSubscribeButtonState();
+    };
+
+    updateSubscribeButtonState();
+    subscribeToggleBtn.addEventListener('click', handleSubscribeToggleClick);
   }
 
   showAllBtn = document.getElementById('show-all-btn');
@@ -2702,6 +3353,21 @@ window.addEventListener('load', function () {
 });
 
 document.addEventListener('click', function (e) {
+  const unsubscribeBtn = e.target.closest('[data-subscribe-action="unsubscribe"]');
+  if (unsubscribeBtn) {
+    e.preventDefault();
+    const nickname = unsubscribeBtn.dataset.authorNickname;
+    unsubscribeFromAuthor(nickname);
+    return;
+  }
+
+  const subscriptionLink = e.target.closest('[data-subscription-card-link]');
+  if (subscriptionLink) {
+    e.preventDefault();
+    const nickname = subscriptionLink.dataset.authorNickname;
+    openAuthorFromSubscription(nickname);
+    return;
+  }
   const categoryBtn = e.target.closest('.creation-popup__category');
   if (categoryBtn) {
     e.preventDefault();

@@ -66,21 +66,31 @@
         <div class="filter-panel__body">
           <div class="filter-panel__pane filter-panel__pane--categories">
             <div class="category-chips">
-              {% for group in categories %}
-              <button
-                class="category-chip"
-                data-category-slug="{{ group.slug }}"
-                style="--chip-color: {{ group.color }}"
-                data-color="{{ group.color }}"
-                data-icon="{{ group.icon }}"
-                aria-pressed="false"
-              >
-                <span class="category-chip__icon">{{ group.icon }}</span>
-                <span class="category-chip__label">{{ group.label }}</span>
-                <span class="category-count">0</span>
-              </button>
-              {% endfor %}
-              <button class="btn reset-btn" id="reset-btn">✖️ Сброс</button>
+               {% for group in categories %}
+               <button
+                 class="category-chip"
+                 data-category-slug="{{ group.slug }}"
+                 style="--chip-color: {{ group.color }}"
+                 data-color="{{ group.color }}"
+                 data-icon="{{ group.icon }}"
+                 aria-pressed="false"
+               >
+                 <span class="category-chip__icon">{{ group.icon }}</span>
+                 <span class="category-chip__label">{{ group.label }}</span>
+                 <span class="category-count">0</span>
+               </button>
+               {% endfor %}
+                <button
+                  class="category-chip subscribe-btn"
+                  id="subscribe-toggle-btn"
+                  aria-pressed="false"
+                  data-subscribe-chip
+                  style="--chip-color: #BDD8E9;"
+                >
+                 <span class="category-chip__icon subscribe-btn__icon" aria-hidden="true">👤</span>
+                 <span class="category-chip__label subscribe-btn__label">Подписки</span>
+                 <span class="category-count subscribe-btn__count" aria-hidden="true">0</span>
+               </button>
             </div>
           </div>
         <div class="filter-panel__pane filter-panel__pane--profile">
@@ -92,7 +102,11 @@
                     </div>
                   </div>
                   <div class="user-panel__actions">
-                    <button type="button" class="profile-mode-btn" data-profile-action="toggle-edit" aria-pressed="false" data-profile-view-only>Редактировать профиль</button>
+                    <div class="user-panel__actions-slot" data-profile-action-slot="toggle-edit">
+                      {% if current_user %}
+                        <button type="button" class="profile-mode-btn" data-profile-action="toggle-edit" aria-pressed="false" data-profile-view-only>Редактировать профиль</button>
+                      {% endif %}
+                    </div>
                   </div>
                 </div>
 
@@ -100,25 +114,57 @@
 
                 <section class="user-panel__author-view is-hidden" aria-label="Информация об авторе" data-author-view>
                   <div class="user-panel__author-view-header">
-                    <button type="button" class="author-view__close" data-author-action="close">
+                    <button
+                      type="button"
+                      class="author-view__close"
+                      data-author-action="close"
+                      data-author-close-auth="← Назад к профилю"
+                      data-author-close-guest="← Назад"
+                    >
                       ← Назад к профилю
                     </button>
                   </div>
                   <div class="user-panel__author-view-body">
-                    <div class="pin-popup__author user-panel__author-intro">
-                      <div class="pin-popup__author-avatar" aria-hidden="true" data-author-avatar>
-                        <span class="pin-popup__author-avatar-placeholder">А</span>
+                      <div class="pin-popup__author user-panel__author-intro">
+                        <div class="pin-popup__author-avatar" aria-hidden="true" data-author-avatar>
+                          <span class="pin-popup__author-avatar-placeholder">А</span>
+                        </div>
+                        <div class="pin-popup__author-info">
+                          <span class="pin-popup__author-nickname" data-author-name>Автор</span>
+                        </div>
+                        <button
+                          type="button"
+                          class="author-panel__subscribe-btn"
+                          data-author-subscribe="true"
+                          data-author-nickname=""
+                        >Подписаться</button>
                       </div>
-                      <div class="pin-popup__author-info">
-                        <span class="pin-popup__author-label">Автор</span>
-                        <span class="pin-popup__author-nickname" data-author-name>Автор</span>
+                    <div class="profile-view-state author-panel__profile-view">
+                      <p class="profile-view-state__nickname" data-author-name>Автор</p>
+                      <div class="profile-view-state__meta">
+                        <span class="profile-view-state__meta-item">
+                          <span class="profile-view-state__meta-label">Возраст</span>
+                          <span class="profile-view-state__meta-value" data-author-age>—</span>
+                        </span>
+                        <span class="profile-view-state__meta-item">
+                          <span class="profile-view-state__meta-label">Пол</span>
+                          <span class="profile-view-state__meta-value" data-author-gender>—</span>
+                        </span>
+                        <span class="profile-view-state__meta-item">
+                          <span class="profile-view-state__meta-label">Рейтинг</span>
+                          <span class="profile-view-state__meta-value" data-author-rating>—</span>
+                        </span>
                       </div>
                     </div>
-                    <div class="author-view__meta">
-                      <span class="author-view__meta-label">Рейтинг автора</span>
-                      <span class="author-view__meta-value" data-author-rating>—</span>
+                    <div class="user-panel__active-pins author-panel__active-pins" data-author-active-pins>
+                      <div class="user-panel__active-pins-header">
+                        <h3 class="user-panel__active-pins-title">Активные точки</h3>
+                        <span class="user-panel__active-pins-count" data-author-active-pins-count>0/5</span>
+                      </div>
+                      <div class="user-panel__active-pins-list" data-author-active-pins-list>
+                        <p class="user-panel__active-pins-empty">Точки пока не отображаются.</p>
+                      </div>
                     </div>
-                    <p class="author-view__hint">Тут отображаются сведения о создателе метки.</p>
                   </div>
                 </section>
 
@@ -154,7 +200,7 @@
                         </div>
                         <div class="profile-form__inputs">
                           <label class="user-panel__field user-panel__field--inline">
-                            <span class="user-panel__label">Никнейм</span>
+                          <span class="user-panel__label">Имя пользователя</span>
                             <div class="user-panel__input-row">
                               <input
                                 class="user-panel__input"
@@ -230,15 +276,34 @@
                         <h3 class="user-panel__active-pins-title">Мои активные точки</h3>
                         <span class="user-panel__active-pins-count" data-active-pins-count>0/5</span>
                       </div>
-                      <div class="user-panel__active-pins-list" data-active-pins-list>
-                        <p class="user-panel__active-pins-empty">Войдите, чтобы увидеть свои метки.</p>
-                      </div>
+                    <div class="user-panel__active-pins-list" data-active-pins-list>
+                      <p class="user-panel__active-pins-empty">Войдите, чтобы увидеть свои метки.</p>
                     </div>
+                  </div>
+
+                    <section
+                      class="user-panel__subscriptions custom-dark-sub-card user-panel__active-pins"
+                      aria-label="Мои подписки"
+                      data-subscriptions-section
+                      style="background: rgba(255, 255, 255, 0.05) !important; border: 1px solid rgba(255, 255, 255, 0.1) !important;"
+                    >
+                      <div class="user-panel__active-pins-header">
+                        <h3 class="user-panel__active-pins-title">Мои подписки</h3>
+                        <span class="user-panel__active-pins-count" data-subscriptions-count>0</span>
+                      </div>
+                      <div
+                        id="subscriptions-list"
+                        class="user-panel__active-pins-list"
+                        data-subscriptions-list
+                      >
+                        <p class="user-panel__subscriptions-empty">Войдите, чтобы увидеть подписки.</p>
+                      </div>
+                    </section>
 
                     <section class="user-panel__friends search-panel" aria-label="Поиск друзей">
                       <div class="search-panel__body">
-                        <label class="search-panel__field">
-                          <span class="search-panel__label">Никнейм</span>
+                         <label class="search-panel__field">
+                           <span class="search-panel__label">Поиск</span>
                           <input
                             id="friend-search-input"
                             class="search-panel__input"

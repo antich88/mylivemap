@@ -59,6 +59,7 @@ if LOCAL_MODE:
     profiles_table = None  # type: ignore
     votes_table = None  # type: ignore
     friendships_table = None  # type: ignore
+    user_subscriptions_table = None  # type: ignore
 
 else:
     from sqlalchemy import (
@@ -175,6 +176,16 @@ else:
         UniqueConstraint("user_id", "friend_id", name="uq_friendships_user_friend"),
     )
 
+    user_subscriptions_table = Table(
+        "user_subscriptions",
+        metadata,
+        Column("id", Integer, primary_key=True),
+        Column("follower_id", String(255), ForeignKey("users.nickname", ondelete="CASCADE"), nullable=False),
+        Column("author_id", String(255), ForeignKey("users.nickname", ondelete="CASCADE"), nullable=False),
+        Column("created_at", DateTime(timezone=True), nullable=False),
+        UniqueConstraint("follower_id", "author_id", name="uq_user_subscriptions_follower_author"),
+    )
+
 
     def init_schema() -> None:
         metadata.create_all(ENGINE)
@@ -213,6 +224,9 @@ else:
         if "friendships" not in table_names:
             metadata.create_all(ENGINE, tables=[friendships_table])
             table_names.add("friendships")
+        if "user_subscriptions" not in table_names:
+            metadata.create_all(ENGINE, tables=[user_subscriptions_table])
+            table_names.add("user_subscriptions")
         if "pins" not in table_names:
             return
         columns = {col["name"] for col in inspector.get_columns("pins")}

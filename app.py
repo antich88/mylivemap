@@ -19,9 +19,12 @@ except ImportError:  # pragma: no cover - optional dependency
     cloudinary_url_for = None
 from auth_store import (
     NicknameAlreadyExistsError,
+    add_user_subscription,
     create_user,
     get_or_create_user_profile,
     get_user_by_nickname,
+    get_user_subscriptions,
+    remove_user_subscription,
     rename_user_profile,
     update_user_avatar_path,
     update_user_nickname,
@@ -169,6 +172,10 @@ def create_app() -> Flask:
             )
         else:
             base["profile"] = None
+        try:
+            base["subscriptions"] = get_user_subscriptions(nickname)
+        except Exception:  # pragma: no cover
+            base["subscriptions"] = []
         return base
 
     def current_user_payload() -> dict | None:
@@ -378,7 +385,14 @@ def create_app() -> Flask:
     @app.route("/me", methods=["GET"])
     def me() -> tuple[dict, int]:
         user = current_user_payload()
-        return {"authenticated": bool(user), "user": user}, 200
+        payload = {"authenticated": bool(user)}
+        if user:
+            payload["user"] = user
+            payload["subscriptions"] = user.get("subscriptions") or []
+        else:
+            payload["user"] = None
+            payload["subscriptions"] = []
+        return payload, 200
 
     @app.route("/profile", methods=["PATCH"])
     def update_profile_fields() -> tuple[dict, int]:
@@ -526,6 +540,8 @@ def create_app() -> Flask:
                         "nickname": author.get("nickname") or user_id,
                         "avatar_url": author.get("avatar_url"),
                         "rating_total": author.get("rating_total"),
+                        "age": author.get("age"),
+                        "gender": author.get("gender"),
                     }
                 else:
                     payload["author"] = None
@@ -567,6 +583,17 @@ def create_app() -> Flask:
         if not pin:
             abort(500)
         return jsonify(pin.to_dict())
+
+    @app.route("/api/authors/<path:nickname>", methods=["GET"])
+    def get_author(nickname: str) -> tuple[dict, int]:
+        normalized = (nickname or "").strip()
+        if not normalized:
+            return {"message": "Никнейм не указан."}, 400
+        user = get_user_by_nickname(normalized)
+        if not user:
+            return {"message": "Автор не найден."}, 404
+        author_state = _build_user_state(user.nickname)
+        return {"author": author_state}, 200
 
     def _require_authenticated_user():
         user = current_user_payload()
@@ -667,6 +694,47 @@ def create_app() -> Flask:
         if result.get("profile_rating") is not None and result["pin_owner"] == user["nickname"]:
             response_payload["profile_rating"] = result["profile_rating"]
         return jsonify(response_payload)
+
+    @app.route("/api/subscriptions", methods=["GET", "POST", "DELETE"])
+    def manage_subscriptions() -> tuple[dict, int]:
+        user = current_user_payload()
+        if not user:
+            return {"message": "Нужно войти в аккаунт."}, 401
+        if request.method == "GET":
+            payload = []
+            try:
+                payload = get_user_subscriptions(user["nickname"])
+            except Exception:  # pragma: no cover
+                payload = []
+            subscriptions_payload = []
+            for nickname in payload:
+                try:
+                    author_state = _build_user_state(nickname)
+                except Exception:
+                    continue
+                subscriptions_payload.append(
+                    {
+                        "nickname": author_state.get("nickname"),
+                        "avatar_url": author_state.get("avatar_url"),
+                    }
+                )
+            return {"subscriptions": subscriptions_payload}, 200
+        data = request.get_json(silent=True) or {}
+        author = str(data.get("author_nickname") or data.get("author") or "").strip()
+        if not author:
+            return {"message": "Никнейм автора не указан."}, 400
+        if request.method == "POST":
+            add_user_subscription(user["nickname"], author)
+            return {"message": "Подписка добавлена."}, 200
+        return {"message": "Неверный метод."}, 405
+
+    @app.route("/api/subscriptions/<path:author_nickname>", methods=["DELETE"])
+    def delete_subscription(author_nickname: str) -> tuple[dict, int]:
+        user = current_user_payload()
+        if not user:
+            return {"message": "Нужно войти в аккаунт."}, 401
+        remove_user_subscription(user["nickname"], author_nickname)
+        return {"message": "Подписка удалена."}, 200
 
     @app.route("/api/user/votes", methods=["GET"])
     def user_votes_route() -> tuple[dict, int]:
