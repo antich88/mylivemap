@@ -3,7 +3,7 @@ services:
     name: live-map-web
     env: python
     plan: free
-    region: eu-central-1
+    region: us-west-2
     branch: main
     buildCommand: bash render-build.sh
     startCommand: gunicorn app:app
@@ -36,4 +36,4 @@ services:
 databases:
   - name: live-map-db
     plan: free
-    region: eu-central-1
+    region: us-west-2
