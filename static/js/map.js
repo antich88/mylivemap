@@ -72,17 +72,10 @@ let subscriptionsListEl = null;
 let subscriptionsCountEl = null;
 let authorPanelCurrentNickname = '';
 
-window.currentCreationMarker = null;
 window.userLocationMarker = null;
 let userLocationIcon = null;
 let map;
 let pendingSharedPinToken = null;
-let creationSelection = getDefaultCreationSelection();
-let touchStartY = null;
-const PANEL_HANDLE_SWIPE_THRESHOLD = 24;
-let panelHandleTouchActive = false;
-const MAP_COLLAPSE_SUPPRESSION_MS = 450;
-let suppressMapCollapseUntil = 0;
 let showAllMode = SHOW_ALL_MODES.OFF;
 let showAllBtn = null;
 let refreshBtn = null;
@@ -101,6 +94,269 @@ let authToggleBtn = null;
 let authPanelElement = null;
 let authPanelVisible = false;
 let ignorePanelHandleClick = false;
+let createSheetState = {
+  isOpen: false,
+  latlng: null,
+  selectedCategorySlug: null,
+};
+let createPreviewMarker = null;
+let createSheetElements = null;
+let createSheetInitialized = false;
+const createSheetSelectors = {
+  sheetId: 'create-sheet',
+  backdropId: 'create-sheet-backdrop',
+  formId: 'create-sheet-form',
+  titleInputId: 'create-title-input',
+};
+
+function getCreateSheetParts() {
+  if (createSheetElements && createSheetElements.sheet?.isConnected) {
+    return createSheetElements;
+  }
+  createSheetElements = {
+    sheet: document.getElementById(createSheetSelectors.sheetId),
+    backdrop: document.getElementById(createSheetSelectors.backdropId),
+    form: document.getElementById(createSheetSelectors.formId),
+    titleInput: document.getElementById(createSheetSelectors.titleInputId),
+  };
+  return createSheetElements;
+}
+
+function resetCreateSheetState() {
+  createSheetState.isOpen = false;
+  createSheetState.latlng = null;
+  createSheetState.selectedCategorySlug = null;
+  closeCreateCategoryDropdown();
+}
+
+function updateCreatePreviewMarker(latlng, color) {
+  if (!latlng) {
+    return;
+  }
+  const html = `<div class="create-preview-marker" style="--preview-color: ${color}"></div>`;
+  const icon = L.divIcon({
+    className: 'preview-marker-wrapper',
+    html,
+    iconSize: [0, 0],
+    iconAnchor: [0, 0],
+  });
+
+  if (createPreviewMarker) {
+    createPreviewMarker.setLatLng(latlng);
+    createPreviewMarker.setIcon(icon);
+    if (!map.hasLayer(createPreviewMarker)) {
+      createPreviewMarker.addTo(map);
+    }
+  } else {
+    createPreviewMarker = L.marker(latlng, {
+      icon,
+      interactive: false,
+      zIndexOffset: 2000,
+    }).addTo(map);
+  }
+}
+
+function populateCategoryDropdownPanel() {
+  const panel = document.getElementById('create-category-panel');
+  if (!panel) {
+    return;
+  }
+  panel.innerHTML = '';
+  const fragment = document.createDocumentFragment();
+  categoriesData.forEach((category) => {
+    if (!category || !category.slug) {
+      return;
+    }
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = 'create-dropdown__option';
+    option.dataset.slug = category.slug;
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'create-dropdown__option-icon';
+    iconSpan.setAttribute('aria-hidden', 'true');
+    iconSpan.textContent = category.icon || '';
+    iconSpan.style.backgroundColor = category.color || 'transparent';
+
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'create-dropdown__option-label';
+    labelSpan.textContent = category.label || category.name || '';
+
+    option.append(iconSpan, labelSpan);
+    fragment.appendChild(option);
+  });
+  panel.appendChild(fragment);
+}
+
+function setSelectedCategory(slug) {
+  if (!slug) {
+    return;
+  }
+  const category = categoriesData.find((item) => item.slug === slug);
+  if (!category) {
+    return;
+  }
+  createSheetState.selectedCategorySlug = slug;
+  const labelEl = document.getElementById('create-category-label');
+  if (labelEl) {
+    labelEl.textContent = category.label || category.name || '';
+  }
+  const iconEl = document.getElementById('create-category-icon');
+  if (iconEl) {
+    iconEl.textContent = category.icon || '';
+    iconEl.style.backgroundColor = category.color || 'transparent';
+  }
+
+  document.querySelectorAll('.create-dropdown__option').forEach((opt) => {
+    if (opt.dataset.slug === slug) {
+      opt.classList.add('is-selected');
+    } else {
+      opt.classList.remove('is-selected');
+    }
+  });
+
+  if (createPreviewMarker && createSheetState.latlng) {
+    const categoryColor = category.color || '#4ade80';
+    updateCreatePreviewMarker(createSheetState.latlng, categoryColor);
+  }
+}
+
+function getCreateCategoryDropdownElements() {
+  return {
+    trigger: document.getElementById('create-category-trigger'),
+    panel: document.getElementById('create-category-panel'),
+  };
+}
+
+function closeCreateCategoryDropdown() {
+  const { panel, trigger } = getCreateCategoryDropdownElements();
+  if (!panel || panel.hasAttribute('hidden')) {
+    return;
+  }
+  panel.setAttribute('hidden', '');
+  if (trigger) {
+    trigger.setAttribute('aria-expanded', 'false');
+  }
+}
+
+function openCreateCategoryDropdown() {
+  const { panel, trigger } = getCreateCategoryDropdownElements();
+  if (!panel) {
+    return;
+  }
+  panel.removeAttribute('hidden');
+  if (trigger) {
+    trigger.setAttribute('aria-expanded', 'true');
+  }
+}
+
+function toggleCreateCategoryDropdown() {
+  const { panel } = getCreateCategoryDropdownElements();
+  if (!panel) {
+    return;
+  }
+  if (panel.hasAttribute('hidden')) {
+    openCreateCategoryDropdown();
+    return;
+  }
+  closeCreateCategoryDropdown();
+}
+
+function attachCategoryDropdownHandlers() {
+  if (attachCategoryDropdownHandlers.__bound) {
+    return;
+  }
+  attachCategoryDropdownHandlers.__bound = true;
+  const { trigger, panel } = getCreateCategoryDropdownElements();
+  if (trigger) {
+    trigger.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleCreateCategoryDropdown();
+    });
+  }
+  if (panel) {
+    panel.addEventListener('click', (event) => {
+      const option = event.target.closest('.create-dropdown__option');
+      if (!option) {
+        return;
+      }
+      event.stopPropagation();
+      const optionSlug = option.dataset.slug;
+      if (optionSlug) {
+        setSelectedCategory(optionSlug);
+      }
+      closeCreateCategoryDropdown();
+    });
+  }
+  document.addEventListener('click', (event) => {
+    const clickedTarget = event.target;
+    if (!panel || panel.hasAttribute('hidden')) {
+      return;
+    }
+    if (trigger && (trigger === clickedTarget || trigger.contains(clickedTarget))) {
+      return;
+    }
+    if (panel.contains(clickedTarget)) {
+      return;
+    }
+    closeCreateCategoryDropdown();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeCreateCategoryDropdown();
+    }
+  });
+}
+
+function closeCreateSheet() {
+  const { sheet, backdrop, form } = getCreateSheetParts();
+  if (sheet) {
+    sheet.style.transform = '';
+    sheet.style.transition = '';
+  }
+  if (sheet) {
+    sheet.setAttribute('hidden', '');
+  }
+  if (backdrop) {
+    backdrop.setAttribute('hidden', '');
+  }
+  if (form) {
+    form.reset();
+  }
+  if (createPreviewMarker) {
+    createPreviewMarker.remove();
+    createPreviewMarker = null;
+  }
+  resetCreateSheetState();
+}
+
+function openCreateSheet(latlng) {
+  if (!latlng) return;
+  const { sheet, backdrop, titleInput } = getCreateSheetParts();
+  createSheetState.latlng = latlng;
+  createSheetState.isOpen = true;
+
+  let defaultColor = '#4ade80';
+  if (categoriesData.length) {
+    defaultColor = categoriesData[0].color || defaultColor;
+    setSelectedCategory(categoriesData[0].slug);
+  }
+
+  updateCreatePreviewMarker(latlng, defaultColor);
+
+  if (sheet) sheet.removeAttribute('hidden');
+  if (backdrop) backdrop.removeAttribute('hidden');
+
+  setTimeout(() => {
+    const sheetEl = document.getElementById('create-sheet');
+    const sheetHeight = sheetEl ? sheetEl.offsetHeight : (window.innerHeight * 0.6);
+    const markerPoint = map.project(latlng, map.getZoom());
+    const targetPoint = markerPoint.add(L.point(0, Math.floor(sheetHeight / 2)));
+    const targetLatLng = map.unproject(targetPoint, map.getZoom());
+    map.setView(targetLatLng, map.getZoom(), { animate: true, duration: 0.4 });
+  }, 50);
+
+}
 const VOTE_DIRECTION_VALUES = {
   up: 1,
   down: -1,
@@ -212,22 +468,8 @@ function releaseFilterPanelForMobile() {
   logFilterPanelState('after-release');
 }
 
-function minimizeFilterPanelForCreation() {
-  minimizeFilterPanelForMobile('creation');
-}
-
-function restoreFilterPanelAfterCreation() {
-  releaseFilterPanelForMobile();
-  collapseFilterPanelAnimated();
-}
-
 function minimizeFilterPanelForPinPopup() {
   minimizeFilterPanelForMobile('pin-popup');
-}
-
-function restoreFilterPanelAfterPinPopup() {
-  releaseFilterPanelForMobile();
-  collapseFilterPanelAnimated();
 }
 
 function collapseDesktopPanels() {
@@ -516,15 +758,11 @@ function updateMarkerFromPin(entry, pin) {
   marker.pinColor = pin.color;
   marker.pinData = pin;
 
-  const { strokeOpacity, fillOpacity } = computeOpacityFromTTL(pin.ttl_seconds);
-  marker.setStyle({
-    color: pin.color,
-    fillColor: pin.color,
-    fillOpacity,
-    opacity: strokeOpacity,
-  });
-
   marker.setLatLng([pin.lat, pin.lng]);
+
+  if (typeof marker.setIcon === 'function') {
+    marker.setIcon(createMarkerLabelIcon(pin));
+  }
 
   const tooltipText = pin.title || pin.nickname || 'Метка';
   if (typeof marker.setTooltipContent === 'function') {
@@ -692,6 +930,8 @@ function renderPinAuthorIntro(pin, isSelf = false) {
   const author = pin.author || {};
   const nickname = author.nickname || pin.user_id || pin.nickname || 'Автор';
   const safeNickname = escapeHtml(nickname);
+  const authorId = author.nickname || pin.user_id || pin.nickname || '';
+  const safeAuthorId = escapeHtml(authorId);
   const avatarUrl = author.avatar_url || pin.avatar_url;
   const avatarMarkup = avatarUrl
     ? `<img src="${avatarUrl}" alt="Аватар ${safeNickname}" loading="lazy" />`
@@ -709,8 +949,12 @@ function renderPinAuthorIntro(pin, isSelf = false) {
           class="pin-popup__author-nickname-btn"
           data-author-panel-trigger
           data-author-self="${isSelf ? 'true' : 'false'}"
+          data-author-link
+          data-author-id="${safeAuthorId}"
         >
+          <span class="pin-popup__author-link">
           <span class="pin-popup__author-nickname">${safeNickname}</span>
+          </span>
         </button>
       </div>
     </div>
@@ -918,6 +1162,27 @@ function showAuthorPanel(author) {
   bindAuthorPanelSubscribeButton(author);
 }
 
+function openAuthorPanel(authorId) {
+  const normalizedId = (authorId || '').trim();
+  if (!normalizedId) {
+    return;
+  }
+  return fetch(`/api/authors/${encodeURIComponent(normalizedId)}`, { credentials: 'same-origin' })
+    .then(handleJsonResponse)
+    .then((payload) => {
+      const author = payload?.author;
+      if (!author) {
+        throw new Error('Данные автора не найдены.');
+      }
+      showAuthorPanel(author);
+      return author;
+    })
+    .catch((error) => {
+      showUserToast(error.message || 'Не удалось открыть профиль автора.');
+      throw error;
+    });
+}
+
 function showUserProfilePanel() {
   const { panel, authorView, userContent } = getAuthorPanelElements();
   if (!panel || !userContent) {
@@ -990,6 +1255,11 @@ function attachAuthorPopupHandlers(popup, pin) {
         showUserProfilePanel();
         return;
       }
+      const authorId = trigger.dataset.authorId || trigger.dataset.author || '';  // fallback
+      if (authorId) {
+        openAuthorPanel(authorId);
+        return;
+      }
       showAuthorPanel(buildPinAuthorInfo(pin));
     });
   });
@@ -1041,6 +1311,8 @@ function createPopupContent(pin) {
       class="pin-popup__author-nickname-btn pin-popup__title-trigger"
       data-author-panel-trigger
       data-author-self="${isAuthor ? 'true' : 'false'}"
+      data-author-link
+      data-author-id="${escapeHtml(pin.author?.nickname || pin.user_id || pin.nickname || '')}"
     >
       <strong>${escapeHtml(pin.nickname || 'Метка')}</strong>
     </button>
@@ -1415,6 +1687,20 @@ function getCurrentUserPins() {
     .filter((pin) => pin.user_id === nickname);
 }
 
+function updateProfileStats(count) {
+  const profileCountElement = document.getElementById('profile-active-pins-count');
+  if (profileCountElement) {
+    profileCountElement.textContent = String(count);
+  }
+}
+
+function updateFollowersCounter(count) {
+  const followersElement = document.getElementById('profile-followers-count');
+  if (followersElement) {
+    followersElement.textContent = String(count);
+  }
+}
+
 function getActivePinText(pin) {
   const ttl = typeof pin.ttl_seconds === 'number' && !Number.isNaN(pin.ttl_seconds)
     ? Math.max(0, Math.ceil(pin.ttl_seconds / 60))
@@ -1736,94 +2022,6 @@ function applyPopupFadeEffect(popup) {
   wrapper.classList.add('popup-fade-in');
 }
 
-function getCreationPopupContent(latlng) {
-  const categoryButtons = categoriesData
-    .map((group) => {
-      const isSelected = creationSelection.categorySlug === group.slug;
-      return `
-        <button type="button" class="creation-popup__category ${isSelected ? 'is-selected' : ''}" data-category-slug="${group.slug}" style="--popup-chip-color: ${group.color};">
-          <span class="creation-popup__category-icon">${group.icon}</span>
-          <span class="creation-popup__category-label">${group.label}</span>
-        </button>
-      `;
-    })
-    .join('');
-
-  return `
-    <div class="creation-popup">
-      <strong>Новая метка</strong>
-      <p class="creation-popup__coords">Координаты: ${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}</p>
-      <div class="creation-popup__category-row" data-selected-category="${creationSelection.categorySlug}">
-        ${categoryButtons}
-      </div>
-      <label>
-        Название
-        <input data-field="nickname" type="text" placeholder="Название" />
-      </label>
-      <label>
-        Описание
-        <textarea data-field="description" rows="3" placeholder="Краткое описание"></textarea>
-      </label>
-      <label>
-        Контакт
-        <input data-field="contact" type="text" placeholder="Телефон или мессенджер" />
-      </label>
-      <button type="button" class="creation-popup__save">Сохранить метку</button>
-    </div>
-  `;
-}
-
-function placeCreationMarker(latlng) {
-  clearCreationMarker();
-
-  creationSelection = getDefaultCreationSelection();
-  const tempColor = colorForCategorySlug(creationSelection.categorySlug);
-  const { strokeOpacity, fillOpacity } = computeOpacityFromTTL(Number.POSITIVE_INFINITY);
-  const marker = L.circleMarker(latlng, {
-    color: tempColor,
-    fillColor: tempColor,
-    fillOpacity,
-    weight: 3,
-    opacity: strokeOpacity,
-    radius: 12,
-  });
-  marker.isCreationMarker = true;
-  window.currentCreationMarker = marker;
-  marker.addTo(map);
-  marker.bindPopup(getCreationPopupContent(latlng), {
-    className: 'creation-popup-wrapper',
-    closeOnClick: false,
-    autoPan: true,
-    keepInView: true,
-    autoPanPaddingTopLeft: L.point(12, 12),
-    autoPanPaddingBottomRight: L.point(12, 12),
-  });
-  marker.on('popupopen', (event) => {
-    applyPopupFadeEffect(event.popup);
-    minimizeFilterPanelForCreation();
-  });
-  marker.on('popupclose', () => {
-    clearCreationMarker();
-    restoreFilterPanelAfterCreation();
-  });
-  marker.openPopup();
-  return marker;
-}
-
-function clearCreationMarker() {
-  const markerToRemove = window.currentCreationMarker;
-  if (!markerToRemove) {
-    return;
-  }
-  window.currentCreationMarker = null;
-  map.closePopup();
-  if (map && map.hasLayer(markerToRemove)) {
-    map.removeLayer(markerToRemove);
-  }
-  if (typeof markerToRemove.remove === 'function') {
-    markerToRemove.remove();
-  }
-}
 
 function countCurrentUserMarkers() {
   const currentNickname = currentAuthUser?.nickname || null;
@@ -2098,17 +2296,34 @@ function renderAuthState(message = '') {
   if (authTitle) {
     authTitle.hidden = authenticated;
   }
-  if (!authenticated) {
-    setAuthMessage(message);
-    if (messageEl) {
-      messageEl.hidden = message.trim().length === 0;
+    if (!authenticated) {
+      const userContent = document.querySelector('[data-user-content]');
+      if (userContent) {
+        userContent.classList.add('is-hidden');
+      }
+      const guestContent = document.querySelector('[data-guest-content]');
+      if (guestContent) {
+        guestContent.classList.remove('is-hidden');
+      }
+      const authPanel = document.getElementById('auth-panel');
+      if (authPanel) {
+        authPanel.classList.remove('auth-panel--authenticated');
+        authPanel.hidden = false;
+      }
+      setAuthMessage(message);
+      const authMessageEl = document.getElementById('auth-message');
+      if (authMessageEl) {
+        authMessageEl.textContent = message || 'Вы вышли из аккаунта.';
+      }
+      if (messageEl) {
+        messageEl.hidden = message.trim().length === 0;
+      }
+    } else {
+      clearAuthMessage();
+      if (messageEl) {
+        messageEl.hidden = true;
+      }
     }
-  } else {
-    clearAuthMessage();
-    if (messageEl) {
-      messageEl.hidden = true;
-    }
-  }
   syncAuthToggleAppearance();
   setAuthToggleAvatar(authenticated ? currentAuthUser?.avatar_url : null);
   emitProfileAuthEvent({ authenticated, user: currentAuthUser, message });
@@ -2126,6 +2341,7 @@ function renderAuthState(message = '') {
   }
   renderAuthState.previousAuthenticated = authenticated;
   syncAuthorCloseButtonLabel();
+  updateFollowersCounter(currentAuthUser?.followers_count ?? 0);
 }
 
 function updateProfileToggleButtonPresence(authenticated) {
@@ -2161,6 +2377,9 @@ function initProfileSettings() {
   const avatarPreview = document.querySelector('.profile-avatar__image');
   const avatarPlaceholder = avatarPreview?.querySelector('.profile-avatar__placeholder');
   const avatarImg = avatarPreview?.querySelector('img');
+  const profileDisplayAvatar = document.getElementById('profile-display-avatar');
+  const profileAvatarInitials = document.getElementById('profile-avatar-initials');
+  const profileUploadInput = document.getElementById('profile-upload-input');
   const avatarUploadBtn = document.querySelector('[data-profile-action="upload-avatar"]');
   const cancelBtn = document.querySelector('[data-profile-action="cancel"]');
   const saveBtn = document.querySelector('[data-profile-action="save"]');
@@ -2172,6 +2391,7 @@ function initProfileSettings() {
   const profileViewAgeEl = document.getElementById('profile-view-age');
   const profileViewGenderEl = document.getElementById('profile-view-gender');
   const profileToggleSlot = profileSection?.querySelector('[data-profile-action-slot="toggle-edit"]');
+  const profileSettingsBtn = profileSection?.querySelector('.profile-settings-btn');
   if (!profileSection || !profileForm) {
     return;
   }
@@ -2243,6 +2463,16 @@ function initProfileSettings() {
       avatarImg.hidden = true;
       avatarPlaceholder?.removeAttribute('hidden');
     }
+    if (profileDisplayAvatar) {
+      if (url) {
+        profileDisplayAvatar.src = url;
+        profileDisplayAvatar.hidden = false;
+        profileAvatarInitials?.setAttribute('hidden', 'true');
+      } else {
+        profileDisplayAvatar.hidden = true;
+        profileAvatarInitials?.removeAttribute('hidden');
+      }
+    }
   };
 
   const getToggleButton = () => profileSection.querySelector('[data-profile-action="toggle-edit"]');
@@ -2253,9 +2483,7 @@ function initProfileSettings() {
      const isView = !isEdit;
     const editToggleBtn = getToggleButton();
     editToggleBtn?.setAttribute('aria-pressed', String(isEdit));
-    if (editToggleBtn) {
-      editToggleBtn.innerHTML = isEdit ? 'Назад' : 'Редактировать профиль';
-    }
+    // we no longer replace button innerHTML to keep icon intact
     if (saveBtn) {
       saveBtn.disabled = !isEdit;
       saveBtn.setAttribute('aria-disabled', String(!isEdit));
@@ -2496,6 +2724,12 @@ function initProfileSettings() {
       .then(handleJsonResponse)
       .then((payload) => {
         updateUserState(payload, 'Аватар обновлён.');
+        const avatarUrl = (payload?.user && payload.user.avatar_url) || payload?.avatar_url;
+        if (avatarUrl && profileDisplayAvatar) {
+          profileDisplayAvatar.src = avatarUrl;
+          profileDisplayAvatar.hidden = false;
+          profileAvatarInitials?.setAttribute('hidden', 'true');
+        }
       })
       .catch((error) => {
         showToastMessage(error.message || 'Не удалось загрузить аватар.');
@@ -2504,14 +2738,13 @@ function initProfileSettings() {
         if (avatarInput) {
           avatarInput.value = '';
         }
+        if (profileUploadInput) {
+          profileUploadInput.value = '';
+        }
       });
   };
 
-  profileToggleSlot?.addEventListener('click', (event) => {
-    const button = event.target.closest('[data-profile-action="toggle-edit"]');
-    if (!button) {
-      return;
-    }
+  profileSettingsBtn?.addEventListener('click', () => {
     const isEdit = profileSection.dataset.profileMode === 'edit';
     setProfileMode(isEdit ? 'view' : 'edit');
   });
@@ -2544,12 +2777,19 @@ function initProfileSettings() {
     avatarInput?.click();
   });
 
-    avatarInput?.addEventListener('change', (event) => {
-      const file = event.target.files?.[0];
-      if (file) {
-        uploadAvatar(file);
-      }
-    });
+  profileUploadInput?.addEventListener('change', (event) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      uploadAvatar(file);
+    }
+  });
+
+  avatarInput?.addEventListener('change', (event) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      uploadAvatar(file);
+    }
+  });
 
     bindFriendSearchHandlers();
 
@@ -2717,7 +2957,6 @@ function initAuthWidget() {
 
   refreshCurrentUser();
   attachAuthFormInputFocusHandlers();
-  attachUserPanelMobileShiftHandlers();
 }
 
 function attachAuthFormInputFocusHandlers() {
@@ -2729,101 +2968,7 @@ function attachAuthFormInputFocusHandlers() {
   if (!inputs.length) {
     return;
   }
-  inputs.forEach((input) => {
-    input.addEventListener('focus', function () {
-      if (window.innerWidth >= MOBILE_BREAKPOINT_PX) {
-        return;
-      }
-      setTimeout(() => {
-        try {
-          this.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        } catch (_error) {
-          // ignore
-        }
-      }, 300);
-    });
-  });
-}
-
-function attachUserPanelMobileShiftHandlers() {
-  const panel = document.querySelector('.user-panel');
-  if (!panel) {
-    return;
-  }
-  let resetTimeoutId = null;
-
-  const setPanelTransform = (value) => {
-    panel.style.transition = 'transform 0.3s ease';
-    panel.style.transform = value;
-  };
-
-  const shouldShiftForElement = (element) => {
-    if (!(element instanceof Element)) {
-      return false;
-    }
-    if (!panel.contains(element)) {
-      return false;
-    }
-    const tagName = element.tagName?.toLowerCase();
-    return ['input', 'textarea', 'select'].includes(tagName);
-  };
-
-  const clearPendingReset = () => {
-    if (resetTimeoutId) {
-      clearTimeout(resetTimeoutId);
-      resetTimeoutId = null;
-    }
-  };
-
-  const handleFocusIn = (event) => {
-    if (!isMobileViewport()) {
-      return;
-    }
-    if (!shouldShiftForElement(event.target)) {
-      return;
-    }
-    clearPendingReset();
-    setPanelTransform('translateY(-30%)');
-  };
-
-  const handleFocusOut = (event) => {
-    if (!isMobileViewport()) {
-      return;
-    }
-    if (!shouldShiftForElement(event.target)) {
-      return;
-    }
-    const nextTarget = event.relatedTarget;
-    if (nextTarget instanceof Element && panel.contains(nextTarget)) {
-      return;
-    }
-    clearPendingReset();
-    resetTimeoutId = setTimeout(() => {
-      setPanelTransform('translateY(0)');
-      resetTimeoutId = null;
-    }, 40);
-  };
-
-  const handleResize = () => {
-    if (isMobileViewport()) {
-      return;
-    }
-    clearPendingReset();
-    setPanelTransform('translateY(0)');
-  };
-
-  const handlePanelPointerDown = () => {
-    if (!isMobileViewport()) {
-      return;
-    }
-    clearPendingReset();
-    setPanelTransform('translateY(0)');
-  };
-
-  document.addEventListener('focusin', handleFocusIn);
-  document.addEventListener('focusout', handleFocusOut);
-  window.addEventListener('resize', handleResize);
-  panel.addEventListener('pointerdown', handlePanelPointerDown);
+  // focus handlers intentionally left empty to avoid panel jumps on mobile keyboards
 }
 
 function copyTextToClipboard(text) {
@@ -2873,34 +3018,53 @@ async function shareLinkWithSystem(shareUrl) {
   }
 }
 
-function handleCreationSubmit(latlng, popupEl, saveBtn) {
-  const form = popupEl;
-  if (!form) {
-    return;
-  }
+function handleCreateSheetSubmit(event) {
+  event.preventDefault();
   if (!isAuthenticated()) {
     showUserToast('Нужно войти в аккаунт, чтобы создавать метки.');
     return;
   }
-  const nickname = form.querySelector('[data-field="nickname"]').value.trim();
-  const description = form.querySelector('[data-field="description"]').value.trim();
-  const contact = form.querySelector('[data-field="contact"]').value.trim();
-  if (!nickname || !description) {
-    alert('Заполните название и описание.');
+  const titleInput = document.getElementById('create-title-input');
+  const descriptionInput = document.getElementById('create-description-input');
+  const contactInput = document.getElementById('create-contact-input');
+  const submitButton = document.getElementById('create-sheet-submit');
+  const selectedCategory = createSheetState?.selectedCategorySlug;
+  const latlng = createSheetState?.latlng;
+
+  const nickname = titleInput?.value?.trim() || '';
+  const description = descriptionInput?.value?.trim() || '';
+  const contact = contactInput?.value?.trim() || '';
+
+  if (!nickname) {
+    alert('Укажите название метки.');
+    return;
+  }
+  if (!selectedCategory) {
+    alert('Выберите категорию.');
+    return;
+  }
+  if (!latlng) {
+    alert('Не выбрана точка на карте.');
     return;
   }
 
   const payload = {
-    category: creationSelection.categorySlug,
-    category_slug: creationSelection.categorySlug,
-    subcategory_slug: creationSelection.subcategorySlug,
+    category: selectedCategory,
+    category_slug: selectedCategory,
+    subcategory_slug: selectedCategory,
     nickname,
-    description,
+    description: description || '',
     contact: contact || null,
     lat: latlng.lat,
     lng: latlng.lng,
   };
-  saveBtn.disabled = true;
+
+  const originalText = submitButton?.textContent;
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = 'Сохранение...';
+  }
+
   fetch('/api/pins', {
     method: 'POST',
     headers: {
@@ -2923,7 +3087,7 @@ function handleCreationSubmit(latlng, popupEl, saveBtn) {
     })
     .then((pin) => {
       addPinToMap(pin);
-      map.closePopup();
+      closeCreateSheet();
       fetchPins();
     })
     .catch((error) => {
@@ -2934,19 +3098,35 @@ function handleCreationSubmit(latlng, popupEl, saveBtn) {
       }
     })
     .finally(() => {
-      saveBtn.disabled = false;
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.textContent = originalText || 'Создать метку';
+      }
     });
 }
 
+function createMarkerLabelIcon(pin) {
+  const category = getCategoryBySlug(pin.category_slug);
+  const categoryColor = category?.color || pin.color || '#ffffff';
+  const markerTitle = escapeHtml(pin.title || pin.nickname || 'Метка');
+  const markerHtml = `
+    <div class="custom-marker-label" style="--chip-color: ${categoryColor}">
+      <span class="marker-status-dot" aria-hidden="true"></span>
+      <span class="marker-text">${markerTitle}</span>
+    </div>
+  `;
+  return L.divIcon({
+    className: 'custom-marker-wrapper',
+    html: markerHtml,
+    iconSize: [0, 0],
+    iconAnchor: [0, 0],
+    popupAnchor: [0, -32],
+  });
+}
+
 function addPinToMap(pin) {
-  const { strokeOpacity, fillOpacity } = computeOpacityFromTTL(pin.ttl_seconds);
-  const marker = L.circleMarker([pin.lat, pin.lng], {
-    color: pin.color,
-    fillColor: pin.color,
-    fillOpacity,
-    weight: 3,
-    opacity: strokeOpacity,
-    radius: 12,
+  const marker = L.marker([pin.lat, pin.lng], {
+    icon: createMarkerLabelIcon(pin),
     interactive: true,
   });
   marker.pinId = pin.id;
@@ -2986,7 +3166,6 @@ function addPinToMap(pin) {
   marker.on('popupclose', () => {
     collapseDesktopPanels();
     stopCommentPolling(marker.pinId);
-    restoreFilterPanelAfterPinPopup();
   });
   marker.on('popupopen', (event) => applyPopupFadeEffect(event.popup));
   if (activeCategorySlugs.has(pin.category_slug)) {
@@ -3015,6 +3194,7 @@ function updateCounters() {
     subscribeCountEl.textContent = String(subscribedMarkers);
   }
   console.debug('[subscriptions] updateCounters', { totalMarkers: activeMarkers.length, subscribedMarkers });
+  updateProfileStats(getCurrentUserPins().length);
   renderActivePinsList();
 }
 
@@ -3165,44 +3345,52 @@ window.addEventListener('load', function () {
     collapseDesktopPanels();
   };
 
-  const resetPanelHandleTouchState = () => {
-    touchStartY = null;
-    panelHandleTouchActive = false;
-    document.removeEventListener('touchend', handlePanelHandleTouchEnd);
-    document.removeEventListener('touchcancel', resetPanelHandleTouchState);
-  };
+  // --- ЛОГИКА СВАЙПА ДЛЯ ЗАКРЫТИЯ ПАНЕЛИ ---
+  const createSheetEl = document.getElementById('create-sheet');
+  if (createSheetEl) {
+    let startY = 0;
+    let currentY = 0;
+    let isDraggingSheet = false;
 
-  const handlePanelHandleTouchEnd = (event) => {
-    if (!panelHandleTouchActive || !touchStartY) {
-      resetPanelHandleTouchState();
-      return;
-    }
-    const touch = event.changedTouches?.[0];
-    if (!touch) {
-      resetPanelHandleTouchState();
-      return;
-    }
-    const deltaY = touch.clientY - touchStartY;
-    if (Math.abs(deltaY) >= PANEL_HANDLE_SWIPE_THRESHOLD) {
-      if (deltaY > 0) {
-        collapseFilterPanelAnimated();
-      } else {
-        expandFilterPanel();
+    createSheetEl.addEventListener('touchstart', (e) => {
+      if (e.target.closest('.create-sheet__drag-handle') || e.target.closest('.create-sheet__header')) {
+        startY = e.touches[0].clientY;
+        isDraggingSheet = true;
+        createSheetEl.style.transition = 'none';
       }
-    }
-    resetPanelHandleTouchState();
-  };
+    }, { passive: true });
 
-  const handlePanelHandleTouchStart = (event) => {
-    if (!event.touches || event.touches.length !== 1) {
-      return;
-    }
-    touchStartY = event.touches[0].clientY;
-    panelHandleTouchActive = true;
-    suppressMapCollapseUntil = Date.now() + MAP_COLLAPSE_SUPPRESSION_MS;
-    document.addEventListener('touchend', handlePanelHandleTouchEnd);
-    document.addEventListener('touchcancel', resetPanelHandleTouchState);
-  };
+    createSheetEl.addEventListener('touchmove', (e) => {
+      if (!isDraggingSheet) return;
+      currentY = e.touches[0].clientY;
+      const deltaY = currentY - startY;
+      if (deltaY > 0) {
+        createSheetEl.style.transform = `translateY(${deltaY}px)`;
+      }
+    }, { passive: true });
+
+    createSheetEl.addEventListener('touchend', () => {
+      if (!isDraggingSheet) return;
+      isDraggingSheet = false;
+      const deltaY = currentY - startY;
+
+      createSheetEl.style.transition = 'transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)';
+
+      if (deltaY > 80) {
+        closeCreateSheet();
+      } else {
+        createSheetEl.style.transform = 'translateY(0)';
+        setTimeout(() => {
+          if (createSheetEl.style.transform === 'translateY(0)') {
+            createSheetEl.style.transform = '';
+            createSheetEl.style.transition = '';
+          }
+        }, 300);
+      }
+      startY = 0;
+      currentY = 0;
+    });
+  }
 
   if (panelHandleContainer) {
     panelHandleContainer.addEventListener('click', (event) => {
@@ -3219,22 +3407,11 @@ window.addEventListener('load', function () {
         togglePanel();
       }
     });
-    panelHandleContainer.addEventListener('touchstart', handlePanelHandleTouchStart, { passive: true });
   }
 
   map.on('click', function (e) {
     logFilterPanelState('map-click-start', { lat: e?.latlng?.lat, lng: e?.latlng?.lng });
-    if (Date.now() < suppressMapCollapseUntil) {
-      return;
-    }
     collapseDesktopPanels();
-    if (window.currentCreationMarker) {
-      logFilterPanelState('map-click-with-existing-creation-marker');
-      clearCreationMarker();
-      restoreFilterPanelAfterCreation();
-      return;
-    }
-
     if (!isAuthenticated()) {
       showUserToast('Войдите или зарегистрируйтесь, чтобы добавлять метки.');
       return;
@@ -3249,12 +3426,17 @@ window.addEventListener('load', function () {
       return;
     }
 
+    if (createSheetState.isOpen) {
+      createSheetState.latlng = e.latlng;
+      return;
+    }
+
     const now = Date.now();
     if (now - lastNonCreationPopupCloseAt < POPUP_REOPEN_GUARD_MS) {
       return;
     }
 
-    placeCreationMarker(e.latlng);
+    openCreateSheet(e.latlng);
   });
 
 let subscribeToggleBtn = document.getElementById('subscribe-toggle-btn');
@@ -3346,10 +3528,26 @@ let subscribeToggleBtn = document.getElementById('subscribe-toggle-btn');
     removeUserAccuracyCircle();
   });
 
+  populateCategoryDropdownPanel();
+  attachCategoryDropdownHandlers();
+
   updateCounters();
 
   refreshMarkers();
   startAutoRefresh();
+
+  const createSheetForm = document.getElementById('create-sheet-form');
+  if (createSheetForm) {
+    createSheetForm.addEventListener('submit', handleCreateSheetSubmit);
+  }
+  const sheetCloseBtn = document.getElementById('create-sheet-close');
+  if (sheetCloseBtn) {
+    sheetCloseBtn.addEventListener('click', () => closeCreateSheet());
+  }
+  const sheetBackdrop = document.getElementById('create-sheet-backdrop');
+  if (sheetBackdrop) {
+    sheetBackdrop.addEventListener('click', () => closeCreateSheet());
+  }
 });
 
 document.addEventListener('click', function (e) {
@@ -3368,39 +3566,6 @@ document.addEventListener('click', function (e) {
     openAuthorFromSubscription(nickname);
     return;
   }
-  const categoryBtn = e.target.closest('.creation-popup__category');
-  if (categoryBtn) {
-    e.preventDefault();
-    const slug = categoryBtn.dataset.categorySlug;
-    const group = getCategoryBySlug(slug);
-    if (!slug || !group) {
-      return;
-    }
-    creationSelection.categorySlug = slug;
-    creationSelection.subcategorySlug = group.subcategories?.[0]?.slug || slug;
-    const row = categoryBtn.closest('.creation-popup__category-row');
-    if (row) {
-      row.dataset.selectedCategory = slug;
-      row.querySelectorAll('.creation-popup__category').forEach((button) => {
-        button.classList.toggle('is-selected', button === categoryBtn);
-      });
-    }
-    if (window.currentCreationMarker) {
-      const newColor = colorForCategorySlug(slug);
-      window.currentCreationMarker.setStyle({ color: newColor, fillColor: newColor });
-    }
-    return;
-  }
-
-  if (e.target && e.target.classList.contains('creation-popup__save')) {
-    if (!window.currentCreationMarker) {
-      return;
-    }
-    const latlng = window.currentCreationMarker.getLatLng();
-    handleCreationSubmit(latlng, document.querySelector('.creation-popup'), e.target);
-    return;
-  }
-
   const voteBtn = e.target.closest('.pin-vote-btn');
   if (voteBtn) {
     e.preventDefault();

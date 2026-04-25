@@ -5,7 +5,7 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+      content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-visual"
     />
     <title>{{ share_meta.title if share_meta else "Живая карта интересов" }}</title>
     <meta property="og:title" content="{{ share_meta.title if share_meta else 'Живая карта интересов' }}" />
@@ -16,347 +16,570 @@
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
     />
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css"
-      integrity="sha256-Sf0x30eJ8aPI1e5k3A1w3NYWe+Y8+XoPD5Lw5+5R2X0="
-      crossorigin="anonymous"
-      referrerpolicy="no-referrer"
-    />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
   </head>
   <body>
     {% set gender_labels = {'M': 'Мужской', 'F': 'Женский'} %}
       <div class="page-shell">
-        <header class="filter-panel">
-        <div class="panel-handle-container" role="button" aria-label="Переключить панель фильтров" tabindex="0">
-          <div class="panel-handle" aria-hidden="true"></div>
-        </div>
-        <div class="filter-panel__actions" aria-label="Панель управления фильтрами">
-          <button
-            id="auth-toggle-btn"
-            class="panel-round-btn auth-toggle-btn"
+        <!-- Компактная кнопка-фильтр в углу -->
+        <div class="filter-trigger-layer">
+          <button 
+            id="filter-trigger-btn" 
+            class="filter-trigger-btn" 
             type="button"
-            aria-label="Открыть панель входа"
+            aria-label="Открыть фильтр категорий"
           >
-            <span class="panel-round-btn__avatar" aria-hidden="true">
-              <img src="" alt="Аватар пользователя" />
+            <svg class="filter-trigger-btn__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="filter-trigger-btn__text">
+              <span id="filter-active-count">0</span> из <span id="filter-total-count">0</span>
             </span>
-            <span class="panel-round-btn__label">ВХОД</span>
           </button>
-          <div class="filter-panel__actions-right">
-            <button
-              id="show-all-btn"
-              class="panel-round-btn show-all-btn"
-              type="button"
-              aria-label="Переключить режим «ВКЛ» для всех категорий"
-            >
-              <span class="show-all-btn__icon" aria-hidden="true">ВКЛ</span>
-            </button>
-            <button
-              id="refresh-btn"
-              class="refresh-btn"
-              type="button"
-              aria-label="Обновить метки"
-            >
-              <span class="refresh-btn__icon" aria-hidden="true">🔄</span>
-            </button>
-          </div>
         </div>
-        <div class="filter-panel__body">
-          <div class="filter-panel__pane filter-panel__pane--categories">
-            <div class="category-chips">
-               {% for group in categories %}
-               <button
-                 class="category-chip"
-                 data-category-slug="{{ group.slug }}"
-                 style="--chip-color: {{ group.color }}"
-                 data-color="{{ group.color }}"
-                 data-icon="{{ group.icon }}"
-                 aria-pressed="false"
-               >
-                 <span class="category-chip__icon">{{ group.icon }}</span>
-                 <span class="category-chip__label">{{ group.label }}</span>
-                 <span class="category-count">0</span>
-               </button>
-               {% endfor %}
-                <button
-                  class="category-chip subscribe-btn"
-                  id="subscribe-toggle-btn"
-                  aria-pressed="false"
-                  data-subscribe-chip
-                  style="--chip-color: #BDD8E9;"
-                >
-                 <span class="category-chip__icon subscribe-btn__icon" aria-hidden="true">👤</span>
-                 <span class="category-chip__label subscribe-btn__label">Подписки</span>
-                 <span class="category-count subscribe-btn__count" aria-hidden="true">0</span>
-               </button>
+
+        <!-- Backdrop для закрытия панели -->
+        <div class="filter-backdrop" id="filter-backdrop"></div>
+
+        <!-- Top Sheet панель с категориями -->
+        <div class="filter-sheet" id="filter-sheet" role="dialog" aria-label="Фильтр категорий">
+          <div class="filter-sheet__header">
+            <div class="filter-sheet__title-block">
+              <h2 class="filter-sheet__title">Категории</h2>
+              <p class="filter-sheet__subtitle">Выберите что показывать на карте</p>
             </div>
+            <button type="button" class="filter-sheet__reset-btn" id="filter-reset-btn">Скрыть</button>
           </div>
-        <div class="filter-panel__pane filter-panel__pane--profile">
-              <section class="user-panel" aria-label="Личный кабинет" aria-expanded="false" data-profile-mode="view">
-                <div class="user-panel__header">
-                  <div class="user-panel__title">
-                    <div class="user-panel__title-row">
-                      <span id="auth-status" class="user-panel__nickname" aria-live="polite">{{ current_user.nickname if current_user else 'Гость' }}</span>
+
+          <div class="filter-sheet__grid category-chips">
+            {% for group in categories %}
+              <button
+                class="category-chip filter-cat-card"
+                data-category-slug="{{ group.slug }}"
+                style="--chip-color: {{ group.color }}"
+                data-color="{{ group.color }}"
+                data-icon="{{ group.icon }}"
+                aria-pressed="false"
+              >
+                <span class="category-chip__icon filter-cat-card__icon">{{ group.icon }}</span>
+                <span class="category-chip__label filter-cat-card__label">{{ group.label }}</span>
+                <span class="category-count filter-cat-card__count">0</span>
+              </button>
+            {% endfor %}
+            <button
+              class="category-chip subscribe-btn filter-cat-card"
+              id="subscribe-toggle-btn"
+              aria-pressed="false"
+              data-subscribe-chip
+              style="--chip-color: #BDD8E9;"
+            >
+              <span class="category-chip__icon subscribe-btn__icon filter-cat-card__icon" aria-hidden="true">👤</span>
+              <span class="category-chip__label subscribe-btn__label filter-cat-card__label">Подписки</span>
+              <span class="category-count subscribe-btn__count filter-cat-card__count" aria-hidden="true">0</span>
+            </button>
+          </div>
+
+          <div class="filter-sheet__actions">
+            <button 
+              id="show-all-btn"
+              class="filter-sheet__btn filter-sheet__btn--secondary panel-round-btn show-all-btn" 
+              type="button"
+              aria-label="Выбрать все категории"
+            >
+              <span class="show-all-btn__icon">Выбрать все</span>
+            </button>
+          </div>
+
+          <div class="filter-sheet__handle" aria-hidden="true"></div>
+        </div>
+    <main class="map-shell">
+      <div id="leaflet-map">
+        <div class="map-control-stack" ontouchstart="event.stopPropagation()" onmousedown="event.stopPropagation()">
+          <button
+            id="refresh-btn"
+            class="refresh-btn"
+            type="button"
+            aria-label="Обновить метки"
+          >
+            <span class="refresh-btn__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+            </span>
+          </button>
+        </div>
+      </div>
+    </main>
+    </div>
+
+  <div class="view-overlay-stack" aria-live="polite">
+    <div class="view-screen" data-view-screen="map"></div>
+    <div class="view-screen view-screen--chats" data-view-screen="chats">
+      <div class="view-screen__content">
+        <p class="view-screen__title">Чаты</p>
+        <p class="view-screen__hint">Подключаем список ваших диалогов.</p>
+        <ul class="chat-list">
+          <li class="chat-list__item">
+            <div>
+              <strong>Анна • Знакомства</strong>
+              <p>Последнее сообщение: «Собираемся возле фонтана»</p>
+            </div>
+            <span class="chat-status">online</span>
+          </li>
+          <li class="chat-list__item">
+            <div>
+              <strong>Спорт-чат • Команда</strong>
+              <p>Нужно ещё два человека для посадки</p>
+            </div>
+            <span class="chat-status">online</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+    <div class="view-screen view-screen--people" data-view-screen="people">
+      <div class="view-screen__content">
+        <p class="view-screen__title">Люди поблизости</p>
+        <div class="people-cards">
+          <article class="people-card">
+            <span class="people-card__avatar" aria-hidden="true">А</span>
+            <div class="people-card__info">
+              <strong>Анна</strong>
+              <span>В радиусе 1 км</span>
+            </div>
+            <button type="button">Написать</button>
+          </article>
+          <article class="people-card">
+            <span class="people-card__avatar" aria-hidden="true">И</span>
+            <div class="people-card__info">
+              <strong>Илья</strong>
+              <span>В радиусе 1 км</span>
+            </div>
+            <button type="button">Написать</button>
+          </article>
+          <article class="people-card">
+            <span class="people-card__avatar" aria-hidden="true">Ж</span>
+            <div class="people-card__info">
+              <strong>Жанна</strong>
+              <span>В радиусе 1 км</span>
+            </div>
+            <button type="button">Написать</button>
+          </article>
+          <article class="people-card">
+            <span class="people-card__avatar" aria-hidden="true">В</span>
+            <div class="people-card__info">
+              <strong>Влад</strong>
+              <span>В радиусе 1 км</span>
+            </div>
+            <button type="button">Написать</button>
+          </article>
+        </div>
+      </div>
+    </div>
+    <div class="view-screen view-screen--profile" data-view-screen="profile">
+      <div class="view-screen__content">
+        <div class="profile-panel" aria-label="Панель профиля">
+            <section class="user-panel" aria-label="Личный кабинет" aria-expanded="true" data-profile-mode="view">
+            <div class="profile-header-top">
+              <h2>Профиль</h2>
+              {% if current_user %}
+                <button type="button" class="profile-settings-btn" data-profile-action="toggle-edit" aria-label="Настройки">
+                  <i class="fa fa-cog" aria-hidden="true"></i>
+                </button>
+              {% endif %}
+            </div>
+            <div class="user-panel__header">
+              <div class="user-panel__title">
+                <div class="user-panel__title-row">
+                  <span id="auth-status" class="user-panel__nickname" aria-live="polite">{{ current_user.nickname if current_user else 'Гость' }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div id="auth-message" class="user-panel__message" role="status" aria-live="polite"></div>
+
+            <section class="user-panel__author-view is-hidden" aria-label="Информация об авторе" data-author-view>
+              <div class="user-panel__author-view-header">
+                <button
+                  type="button"
+                  class="author-view__close"
+                  data-author-action="close"
+                  data-author-close-auth="← Назад к профилю"
+                  data-author-close-guest="← Назад"
+                >
+                  ← Назад к профилю
+                </button>
+              </div>
+              <div class="user-panel__author-view-body">
+                <div class="pin-popup__author user-panel__author-intro">
+                  <div class="pin-popup__author-avatar" aria-hidden="true" data-author-avatar>
+                    <span class="pin-popup__author-avatar-placeholder">А</span>
+                  </div>
+                  <div class="pin-popup__author-info">
+                    <span class="pin-popup__author-nickname" data-author-name>Автор</span>
+                  </div>
+                  <button
+                    type="button"
+                    class="author-panel__subscribe-btn"
+                    data-author-subscribe="true"
+                    data-author-nickname=""
+                  >Подписаться</button>
+                </div>
+                <div class="profile-view-state author-panel__profile-view">
+                  <p class="profile-view-state__nickname" data-author-name>Автор</p>
+                  <div class="profile-view-state__meta">
+                    <span class="profile-view-state__meta-item">
+                      <span class="profile-view-state__meta-label">Возраст</span>
+                      <span class="profile-view-state__meta-value" data-author-age>—</span>
+                    </span>
+                    <span class="profile-view-state__meta-item">
+                      <span class="profile-view-state__meta-label">Пол</span>
+                      <span class="profile-view-state__meta-value" data-author-gender>—</span>
+                    </span>
+                    <span class="profile-view-state__meta-item">
+                      <span class="profile-view-state__meta-label">Рейтинг</span>
+                      <span class="profile-view-state__meta-value" data-author-rating>—</span>
+                    </span>
+                  </div>
+                </div>
+                <div class="user-panel__active-pins author-panel__active-pins" data-author-active-pins>
+                  <div class="user-panel__active-pins-header">
+                    <h3 class="user-panel__active-pins-title">Активные точки</h3>
+                    <span class="user-panel__active-pins-count" data-author-active-pins-count>0/5</span>
+                  </div>
+                  <div class="user-panel__active-pins-list" data-author-active-pins-list>
+                    <p class="user-panel__active-pins-empty">Точки пока не отображаются.</p>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <div class="user-panel__content user-panel__user-content {% if not current_user %}is-hidden{% endif %}" data-user-content>
+              <div class="user-panel__settings">
+                <form id="profile-form" class="profile-form" autocomplete="off">
+                  <div class="profile-avatar" data-profile-section="avatar">
+                    <div class="profile-avatar__image" role="presentation">
+                      <img src="{{ current_user.avatar_url if current_user and current_user.avatar_url else '' }}" alt="Аватар" {% if not current_user or not current_user.avatar_url %}hidden{% endif %} />
+                      <span class="profile-avatar__placeholder" aria-hidden="true" {% if current_user and current_user.avatar_url %}hidden{% endif %}>👤</span>
+                      <button type="button" class="profile-avatar__upload" aria-label="Изменить фото" data-profile-action="upload-avatar">📷</button>
+                    </div>
+                    <input type="file" accept="image/*" name="profile_avatar" id="profile-avatar-input" hidden />
+                  </div>
+
+                    <div class="user-panel__stack" id="user-panel-stack">
+                      <div class="profile-view-state" data-profile-view style="display: flex; flex-direction: column;">
+                        <div class="profile-avatar-wrapper">
+                          <div class="profile-avatar-ring">
+                            <div class="profile-avatar-inner">
+                              {% if current_user and current_user.avatar_url %}
+                                <img
+                                  src="{{ current_user.avatar_url }}"
+                                  alt="Аватар"
+                                  id="profile-display-avatar"
+                                />
+                                <span id="profile-avatar-initials" hidden>
+                                  {{ current_user.nickname[:2] | upper if current_user else 'AM' }}
+                                </span>
+                              {% else %}
+                                <span id="profile-avatar-initials">
+                                  {{ current_user.nickname[:2] | upper if current_user else 'AM' }}
+                                </span>
+                                <img
+                                  src=""
+                                  alt="Аватар"
+                                  id="profile-display-avatar"
+                                  hidden
+                                />
+                              {% endif %}
+                              <div
+                                class="profile-avatar-edit-overlay"
+                                onclick="document.getElementById('profile-upload-input').click();"
+                              >
+                                <i class="fa fa-camera" aria-hidden="true"></i>
+                              </div>
+                              <input type="file" id="profile-upload-input" accept="image/*" hidden />
+                            </div>
+                          </div>
+                          <span class="profile-status-dot"></span>
+                        </div>
+
+                        <div class="profile-info-text">
+                          <h3 class="profile-name" id="profile-view-nickname">{{ current_user.nickname if current_user else 'Алексей М.' }}</h3>
+                          <p class="profile-demographics">
+                            <span id="profile-view-age">{{ current_user.age if current_user and current_user.age else '26' }}</span> лет •
+                            <span id="profile-view-gender">{{ gender_labels.get(current_user.gender, 'Мужской') if current_user else 'Мужской' }}</span>
+                          </p>
+                          <div class="profile-stars">
+                            <span class="star-filled">★</span><span class="star-filled">★</span><span class="star-filled">★</span><span class="star-filled">★</span><span class="star-empty">★</span>
+                          </div>
+                        </div>
+
+                        <div class="profile-stats-row">
+                          <div class="profile-stat-card">
+                            <span class="stat-val" id="profile-active-pins-count">{{ current_user.points_count|default(3) }}</span>
+                            <span class="stat-label">Активных<br>точек</span>
+                          </div>
+                          <div class="profile-stat-card">
+                            <span class="stat-val" id="profile-followers-count">{{ current_user.followers_count|default(12) }}</span>
+                            <span class="stat-label">Подписчиков</span>
+                          </div>
+                          <div class="profile-stat-card">
+                            <span class="stat-val" id="profile-view-rating" data-profile-rating>{{ current_user.rating_total|default('4.2') }}</span>
+                            <span class="stat-label">Рейтинг</span>
+                          </div>
+                        </div>
+                      </div>
+                    <div class="profile-form__inputs">
+                      <label class="user-panel__field user-panel__field--inline">
+                        <span class="user-panel__label">Имя пользователя</span>
+                        <div class="user-panel__input-row">
+                          <input
+                            class="user-panel__input"
+                            name="profile_display_name"
+                            type="text"
+                            placeholder="Введите имя"
+                            autocomplete="off"
+                            maxlength="16"
+                            value="{{ current_user.nickname if current_user else '' }}"
+                            aria-describedby="display-name-hint"
+                            data-profile-field="display-name"
+                          />
+                        </div>
+                        <span id="display-name-hint" class="user-panel__hint">До 16 символов, без эмодзи.</span>
+                      </label>
+
+                      <label class="user-panel__field">
+                        <span class="user-panel__label">Возраст</span>
+                        <input
+                          class="user-panel__input"
+                          name="profile_age"
+                          type="number"
+                          inputmode="numeric"
+                          min="0"
+                          max="120"
+                          placeholder="21"
+                          autocomplete="off"
+                          data-profile-field="age"
+                        />
+                      </label>
+
+                      <label class="user-panel__field">
+                        <span class="user-panel__label">Пол</span>
+                        <select class="user-panel__select" name="profile_gender" data-profile-field="gender">
+                          <option value="" hidden>Выберите</option>
+                          <option value="M">Мужской</option>
+                          <option value="F">Женский</option>
+                        </select>
+                      </label>
+
+                      <div class="profile-actions" role="group" aria-label="Действия с профилем">
+                        <button type="button" class="profile-action profile-action--cancel" data-profile-action="cancel" disabled>Отмена</button>
+                        <button type="submit" class="profile-action profile-action--save" data-profile-action="save" disabled>Сохранить</button>
+                      </div>
                     </div>
                   </div>
-                  <div class="user-panel__actions">
-                    <div class="user-panel__actions-slot" data-profile-action-slot="toggle-edit">
-                      {% if current_user %}
-                        <button type="button" class="profile-mode-btn" data-profile-action="toggle-edit" aria-pressed="false" data-profile-view-only>Редактировать профиль</button>
-                      {% endif %}
+                </form>
+
+                <div class="password-collapse" data-password-state="collapsed">
+                  <button class="user-panel__password-btn" type="button" data-password-action="toggle">Изменить пароль</button>
+                  <form id="password-form" class="password-form" hidden autocomplete="off">
+                    <label class="user-panel__field">
+                      <span class="user-panel__label">Текущий пароль</span>
+                      <input class="user-panel__input" name="current_password" type="password" autocomplete="current-password" minlength="6" />
+                    </label>
+                    <label class="user-panel__field">
+                      <span class="user-panel__label">Новый пароль</span>
+                      <input class="user-panel__input" name="new_password" type="password" autocomplete="new-password" minlength="6" />
+                    </label>
+                    <label class="user-panel__field">
+                      <span class="user-panel__label">Повторите новый пароль</span>
+                      <input class="user-panel__input" name="new_password_confirm" type="password" autocomplete="new-password" minlength="6" />
+                    </label>
+                    <div class="password-actions">
+                      <button type="button" class="profile-action profile-action--cancel" data-password-action="cancel">Отмена</button>
+                      <button type="submit" class="profile-action profile-action--save" data-password-action="save">Сохранить</button>
                     </div>
+                  </form>
+                </div>
+
+                <div class="user-panel__active-pins" data-active-pins-section>
+                  <div class="user-panel__active-pins-header">
+                    <h3 class="user-panel__active-pins-title">Мои активные точки</h3>
+                    <span class="user-panel__active-pins-count" data-active-pins-count>0/5</span>
+                  </div>
+                  <div class="user-panel__active-pins-list" data-active-pins-list>
+                    <p class="user-panel__active-pins-empty">Войдите, чтобы увидеть свои метки.</p>
                   </div>
                 </div>
 
-                <div id="auth-message" class="user-panel__message" role="status" aria-live="polite"></div>
-
-                <section class="user-panel__author-view is-hidden" aria-label="Информация об авторе" data-author-view>
-                  <div class="user-panel__author-view-header">
-                    <button
-                      type="button"
-                      class="author-view__close"
-                      data-author-action="close"
-                      data-author-close-auth="← Назад к профилю"
-                      data-author-close-guest="← Назад"
-                    >
-                      ← Назад к профилю
-                    </button>
+                <section
+                  class="user-panel__subscriptions custom-dark-sub-card user-panel__active-pins"
+                  aria-label="Мои подписки"
+                  data-subscriptions-section
+                  style="background: rgba(255, 255, 255, 0.05) !important; border: 1px solid rgba(255, 255, 255, 0.1) !important;"
+                >
+                  <div class="user-panel__active-pins-header">
+                    <h3 class="user-panel__active-pins-title">Мои подписки</h3>
+                    <span class="user-panel__active-pins-count" data-subscriptions-count>0</span>
                   </div>
-                  <div class="user-panel__author-view-body">
-                      <div class="pin-popup__author user-panel__author-intro">
-                        <div class="pin-popup__author-avatar" aria-hidden="true" data-author-avatar>
-                          <span class="pin-popup__author-avatar-placeholder">А</span>
-                        </div>
-                        <div class="pin-popup__author-info">
-                          <span class="pin-popup__author-nickname" data-author-name>Автор</span>
-                        </div>
-                        <button
-                          type="button"
-                          class="author-panel__subscribe-btn"
-                          data-author-subscribe="true"
-                          data-author-nickname=""
-                        >Подписаться</button>
-                      </div>
-                    <div class="profile-view-state author-panel__profile-view">
-                      <p class="profile-view-state__nickname" data-author-name>Автор</p>
-                      <div class="profile-view-state__meta">
-                        <span class="profile-view-state__meta-item">
-                          <span class="profile-view-state__meta-label">Возраст</span>
-                          <span class="profile-view-state__meta-value" data-author-age>—</span>
-                        </span>
-                        <span class="profile-view-state__meta-item">
-                          <span class="profile-view-state__meta-label">Пол</span>
-                          <span class="profile-view-state__meta-value" data-author-gender>—</span>
-                        </span>
-                        <span class="profile-view-state__meta-item">
-                          <span class="profile-view-state__meta-label">Рейтинг</span>
-                          <span class="profile-view-state__meta-value" data-author-rating>—</span>
-                        </span>
-                      </div>
-                    </div>
-                    <div class="user-panel__active-pins author-panel__active-pins" data-author-active-pins>
-                      <div class="user-panel__active-pins-header">
-                        <h3 class="user-panel__active-pins-title">Активные точки</h3>
-                        <span class="user-panel__active-pins-count" data-author-active-pins-count>0/5</span>
-                      </div>
-                      <div class="user-panel__active-pins-list" data-author-active-pins-list>
-                        <p class="user-panel__active-pins-empty">Точки пока не отображаются.</p>
-                      </div>
-                    </div>
+                  <div
+                    id="subscriptions-list"
+                    class="user-panel__active-pins-list"
+                    data-subscriptions-list
+                  >
+                    <p class="user-panel__subscriptions-empty">Войдите, чтобы увидеть подписки.</p>
                   </div>
                 </section>
 
-                <div class="user-panel__content user-panel__user-content {% if not current_user %}is-hidden{% endif %}" data-user-content>
-                  <div class="user-panel__settings">
-                    <form id="profile-form" class="profile-form" autocomplete="off">
-                      <div class="profile-avatar" data-profile-section="avatar">
-                        <div class="profile-avatar__image" role="presentation">
-                          <img src="{{ current_user.avatar_url if current_user and current_user.avatar_url else '' }}" alt="Аватар" {% if not current_user or not current_user.avatar_url %}hidden{% endif %} />
-                          <span class="profile-avatar__placeholder" aria-hidden="true" {% if current_user and current_user.avatar_url %}hidden{% endif %}>👤</span>
-                          <button type="button" class="profile-avatar__upload" aria-label="Изменить фото" data-profile-action="upload-avatar">📷</button>
-                        </div>
-                        <input type="file" accept="image/*" name="profile_avatar" id="profile-avatar-input" hidden />
-                      </div>
-
-                      <div class="user-panel__stack" id="user-panel-stack">
-                        <div class="profile-view-state" data-profile-view>
-                          <p class="profile-view-state__nickname" id="profile-view-nickname">{{ current_user.nickname if current_user else 'Гость' }}</p>
-                          <div class="profile-view-state__meta">
-                            <span class="profile-view-state__meta-item">
-                              <span class="profile-view-state__meta-label">Возраст</span>
-                              <span id="profile-view-age">{{ current_user.age if current_user and current_user.age else '—' }}</span>
-                            </span>
-                            <span class="profile-view-state__meta-item">
-                              <span class="profile-view-state__meta-label">Пол</span>
-                              <span id="profile-view-gender">{{ gender_labels.get(current_user.gender, '—') if current_user else '—' }}</span>
-                            </span>
-                            <span class="profile-view-state__meta-item">
-                              <span class="profile-view-state__meta-label">Рейтинг</span>
-                              <span id="profile-view-rating" data-profile-rating>{{ current_user.rating_total if current_user else '—' }}</span>
-                            </span>
-                          </div>
-                        </div>
-                        <div class="profile-form__inputs">
-                          <label class="user-panel__field user-panel__field--inline">
-                          <span class="user-panel__label">Имя пользователя</span>
-                            <div class="user-panel__input-row">
-                              <input
-                                class="user-panel__input"
-                                name="profile_display_name"
-                                type="text"
-                                placeholder="Введите имя"
-                                autocomplete="off"
-                                maxlength="16"
-                                value="{{ current_user.nickname if current_user else '' }}"
-                                aria-describedby="display-name-hint"
-                                data-profile-field="display-name"
-                              />
-                            </div>
-                            <span id="display-name-hint" class="user-panel__hint">До 16 символов, без эмодзи.</span>
-                          </label>
-
-                          <label class="user-panel__field">
-                            <span class="user-panel__label">Возраст</span>
-                            <input
-                              class="user-panel__input"
-                              name="profile_age"
-                              type="number"
-                              inputmode="numeric"
-                              min="0"
-                              max="120"
-                              placeholder="21"
-                              autocomplete="off"
-                              data-profile-field="age"
-                            />
-                          </label>
-
-                          <label class="user-panel__field">
-                            <span class="user-panel__label">Пол</span>
-                            <select class="user-panel__select" name="profile_gender" data-profile-field="gender">
-                              <option value="" hidden>Выберите</option>
-                              <option value="M">Мужской</option>
-                              <option value="F">Женский</option>
-                            </select>
-                          </label>
-
-                          <div class="profile-actions profile-actions--sticky" role="group" aria-label="Действия с профилем">
-                            <button type="button" class="profile-action profile-action--cancel" data-profile-action="cancel" disabled>Отмена</button>
-                            <button type="submit" class="profile-action profile-action--save" data-profile-action="save" disabled>Сохранить</button>
-                          </div>
-                        </div>
-                      </div>
-                    </form>
-
-                    <div class="password-collapse" data-password-state="collapsed">
-                      <button class="user-panel__password-btn" type="button" data-password-action="toggle">Изменить пароль</button>
-                      <form id="password-form" class="password-form" hidden autocomplete="off">
-                        <label class="user-panel__field">
-                          <span class="user-panel__label">Текущий пароль</span>
-                          <input class="user-panel__input" name="current_password" type="password" autocomplete="current-password" minlength="6" />
-                        </label>
-                        <label class="user-panel__field">
-                          <span class="user-panel__label">Новый пароль</span>
-                          <input class="user-panel__input" name="new_password" type="password" autocomplete="new-password" minlength="6" />
-                        </label>
-                        <label class="user-panel__field">
-                          <span class="user-panel__label">Повторите новый пароль</span>
-                          <input class="user-panel__input" name="new_password_confirm" type="password" autocomplete="new-password" minlength="6" />
-                        </label>
-                        <div class="password-actions">
-                          <button type="button" class="profile-action profile-action--cancel" data-password-action="cancel">Отмена</button>
-                          <button type="submit" class="profile-action profile-action--save" data-password-action="save">Сохранить</button>
-                        </div>
-                      </form>
-                    </div>
-
-                    <div class="user-panel__active-pins" data-active-pins-section>
-                      <div class="user-panel__active-pins-header">
-                        <h3 class="user-panel__active-pins-title">Мои активные точки</h3>
-                        <span class="user-panel__active-pins-count" data-active-pins-count>0/5</span>
-                      </div>
-                    <div class="user-panel__active-pins-list" data-active-pins-list>
-                      <p class="user-panel__active-pins-empty">Войдите, чтобы увидеть свои метки.</p>
-                    </div>
+                <section class="user-panel__friends search-panel" aria-label="Поиск друзей">
+                  <div class="search-panel__body">
+                    <label class="search-panel__field">
+                      <span class="search-panel__label">Поиск</span>
+                      <input
+                        id="friend-search-input"
+                        class="search-panel__input"
+                        type="text"
+                        autocomplete="off"
+                        placeholder="Найти по нику"
+                        aria-label="Никнейм для поиска"
+                      />
+                    </label>
+                    <button type="button" class="search-panel__btn" id="friend-search-btn">Найти</button>
                   </div>
+                  <div id="search-results" class="search-results is-hidden" aria-live="polite"></div>
+                </section>
 
-                    <section
-                      class="user-panel__subscriptions custom-dark-sub-card user-panel__active-pins"
-                      aria-label="Мои подписки"
-                      data-subscriptions-section
-                      style="background: rgba(255, 255, 255, 0.05) !important; border: 1px solid rgba(255, 255, 255, 0.1) !important;"
-                    >
-                      <div class="user-panel__active-pins-header">
-                        <h3 class="user-panel__active-pins-title">Мои подписки</h3>
-                        <span class="user-panel__active-pins-count" data-subscriptions-count>0</span>
-                      </div>
-                      <div
-                        id="subscriptions-list"
-                        class="user-panel__active-pins-list"
-                        data-subscriptions-list
-                      >
-                        <p class="user-panel__subscriptions-empty">Войдите, чтобы увидеть подписки.</p>
-                      </div>
-                    </section>
-
-                    <section class="user-panel__friends search-panel" aria-label="Поиск друзей">
-                      <div class="search-panel__body">
-                         <label class="search-panel__field">
-                           <span class="search-panel__label">Поиск</span>
-                          <input
-                            id="friend-search-input"
-                            class="search-panel__input"
-                            type="text"
-                            autocomplete="off"
-                            placeholder="Найти по нику"
-                            aria-label="Никнейм для поиска"
-                          />
-                        </label>
-                        <button type="button" class="search-panel__btn" id="friend-search-btn">Найти</button>
-                      </div>
-                      <div id="search-results" class="search-results is-hidden" aria-live="polite"></div>
-                    </section>
-
-                    <div class="user-panel__footer">
-                      <button id="logout-btn" class="user-panel__logout" type="button" hidden>Выйти</button>
-                    </div>
-                  </div>
+                <div class="user-panel__footer">
+                  <button id="logout-btn" class="user-panel__logout" type="button" hidden>Выйти</button>
                 </div>
+              </div>
+            </div>
 
-                <div class="user-panel__auth user-panel__guest-content {% if current_user %}is-hidden{% endif %}" aria-live="polite" data-guest-content>
-                  <div id="auth-panel" class="auth-panel" hidden>
-                    <h3 class="auth-panel__title" id="auth-panel-title">Войдите в аккаунт</h3>
-
-                    <form id="auth-form" class="auth-panel__form" autocomplete="on">
-                      <label class="auth-field">
-                        <span class="auth-field__icon" aria-hidden="true">👤</span>
-                        <input name="nickname" type="text" minlength="3" maxlength="16" required placeholder="Имя пользователя" autocomplete="username" />
-                      </label>
-                      <label class="auth-field">
-                        <span class="auth-field__icon" aria-hidden="true">🔒</span>
-                        <input name="password" type="password" minlength="6" required placeholder="Пароль" autocomplete="new-password" />
-                      </label>
-                      <label class="auth-field auth-field--register-only" data-auth-mode="register" hidden>
-                        <span class="auth-field__icon" aria-hidden="true">🔒</span>
-                        <input name="password_confirm" type="password" minlength="6" placeholder="Повторите пароль" autocomplete="off" />
-                      </label>
-                      <button id="auth-submit-btn" type="submit" class="auth-panel__submit">Войти</button>
-                    </form>
-
-                    <p class="auth-panel__hint" id="auth-switch-text">
-                      <span class="auth-panel__hint-prefix" id="auth-switch-prefix">Или</span>
-                      <button type="button" class="auth-panel__switch-link" id="auth-switch-link">создайте аккаунт</button>
-                    </p>
-                  </div>
-                </div>
-              </section>
+            <div class="user-panel__auth user-panel__guest-content {% if current_user %}is-hidden{% endif %}" aria-live="polite" data-guest-content>
+                <div id="auth-panel" class="auth-panel">
+                <h3 class="auth-panel__title" id="auth-panel-title">Войдите в аккаунт</h3>
+                <form id="auth-form" class="auth-panel__form" autocomplete="on">
+                  <label class="auth-field">
+                    <span class="auth-field__icon" aria-hidden="true">👤</span>
+                    <input name="nickname" type="text" minlength="3" maxlength="16" required placeholder="Имя пользователя" autocomplete="username" />
+                  </label>
+                  <label class="auth-field">
+                    <span class="auth-field__icon" aria-hidden="true">🔒</span>
+                    <input name="password" type="password" minlength="6" required placeholder="Пароль" autocomplete="new-password" />
+                  </label>
+                  <label class="auth-field auth-field--register-only" data-auth-mode="register" hidden>
+                    <span class="auth-field__icon" aria-hidden="true">🔒</span>
+                    <input name="password_confirm" type="password" minlength="6" placeholder="Повторите пароль" autocomplete="off" />
+                  </label>
+                  <button id="auth-submit-btn" type="submit" class="auth-panel__submit">Войти</button>
+                </form>
+                <p class="auth-panel__hint" id="auth-switch-text">
+                  <span class="auth-panel__hint-prefix" id="auth-switch-prefix">Или</span>
+                  <button type="button" class="auth-panel__switch-link" id="auth-switch-link">создайте аккаунт</button>
+                </p>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
-    </header>
-    <main class="map-shell">
-      <div id="leaflet-map"></div>
-    </main>
+    </div>
+  </div>
+
+  <nav class="bottom-nav" aria-label="Нижняя навигация">
+    <button class="bottom-nav__item" type="button" data-nav-target="map">
+      <span class="bottom-nav__icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"></polygon></svg>
+      </span>
+      <span class="bottom-nav__label">Карта</span>
+    </button>
+    <button class="bottom-nav__item" type="button" data-nav-target="chats">
+      <span class="bottom-nav__icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+      </span>
+      <span class="bottom-nav__label">Чаты</span>
+    </button>
+    <button class="bottom-nav__item" type="button" data-nav-target="people">
+      <span class="bottom-nav__icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+      </span>
+      <span class="bottom-nav__label">Люди</span>
+    </button>
+    <button class="bottom-nav__item" type="button" data-nav-target="profile">
+      <span class="bottom-nav__icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+      </span>
+      <span class="bottom-nav__label">Профиль</span>
+    </button>
+  </nav>
+
+  <!-- Backdrop для Sheet'а создания метки -->
+  <div class="create-sheet-backdrop" id="create-sheet-backdrop" hidden></div>
+
+  <!-- Bottom Sheet "Новая метка" -->
+  <div class="create-sheet" id="create-sheet" role="dialog" aria-modal="true" aria-labelledby="create-sheet-title" hidden>
+    <div class="create-sheet__drag-handle" aria-hidden="true"></div>
+    <div class="create-sheet__header">
+      <h2 class="create-sheet__title" id="create-sheet-title">Новая метка</h2>
+      <button type="button" class="create-sheet__close" id="create-sheet-close" aria-label="Закрыть">✕</button>
+    </div>
+
+    <form class="create-sheet__form" id="create-sheet-form" autocomplete="off">
+      <!-- Категория (dropdown) -->
+      <div class="create-field">
+        <label class="create-field__label">Категория</label>
+        <button type="button" class="create-dropdown__trigger" id="create-category-trigger" aria-haspopup="listbox" aria-expanded="false">
+          <span class="create-dropdown__selected">
+            <span class="create-dropdown__icon" id="create-category-icon">💬</span>
+            <span class="create-dropdown__label" id="create-category-label">Общение</span>
+          </span>
+          <span class="create-dropdown__chevron" aria-hidden="true">▾</span>
+        </button>
+        <div class="create-dropdown__panel" id="create-category-panel" hidden role="listbox">
+          <!-- Заполняется JS на основе categoriesData -->
+        </div>
+      </div>
+
+      <!-- Название -->
+      <div class="create-field">
+        <label class="create-field__label" for="create-title-input">Название</label>
+        <input
+          type="text"
+          id="create-title-input"
+          class="create-field__input"
+          name="title"
+          maxlength="50"
+          placeholder="Введите название"
+          required
+        />
+      </div>
+
+      <!-- Описание -->
+        <div class="create-field">
+          <label class="create-field__label" for="create-description-input">Описание</label>
+          <textarea
+            id="create-description-input"
+            class="create-field__textarea"
+            name="description"
+            maxlength="500"
+            rows="3"
+            placeholder="Краткое описание"
+            required
+          ></textarea>
+        </div>
+
+      <!-- Контакт (обязательное) -->
+        <div class="create-field">
+          <label class="create-field__label" for="create-contact-input">Контакт</label>
+          <input
+            type="text"
+            id="create-contact-input"
+            class="create-field__input"
+            name="contact"
+            placeholder="Телефон или мессенджер"
+          />
+        </div>
+
+      <!-- Кнопка сохранения -->
+      <button type="submit" class="create-sheet__submit" id="create-sheet-submit">Создать метку</button>
+    </form>
   </div>
   <script id="live-map-bootstrap" type="application/json">
     {{ bootstrap_json | safe }}
@@ -366,5 +589,154 @@
   </script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
   <script src="{{ url_for('static', filename='js/map.js') }}" defer></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const overlayStack = document.querySelector('.view-overlay-stack');
+      const navButtons = Array.from(document.querySelectorAll('.bottom-nav__item'));
+      const viewScreens = Array.from(document.querySelectorAll('[data-view-screen]'));
+
+      if (!overlayStack || !navButtons.length || !viewScreens.length) {
+        return;
+      }
+
+      const activateView = (name) => {
+        navButtons.forEach((button) => {
+          const isActive = button.dataset.navTarget === name;
+          button.classList.toggle('bottom-nav__item--active', isActive);
+        });
+        viewScreens.forEach((screen) => {
+          const matches = screen.dataset.viewScreen === name;
+          screen.classList.toggle('view-screen--active', matches);
+        });
+        overlayStack.classList.toggle('view-overlay-stack--visible', name !== 'map');
+        if (typeof setAuthPanelVisibility === 'function') {
+          if (name === 'profile') {
+            if (typeof ensureProfileViewMode === 'function') {
+              ensureProfileViewMode();
+            }
+            setAuthPanelVisibility(true);
+          } else {
+            setAuthPanelVisibility(false);
+          }
+        }
+      };
+
+      navButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          activateView(button.dataset.navTarget || 'map');
+        });
+      });
+
+      const mapControlStack = document.querySelector('.map-control-stack');
+      if (mapControlStack && typeof L !== 'undefined') {
+        L.DomEvent.disableClickPropagation(mapControlStack);
+        L.DomEvent.disableScrollPropagation(mapControlStack);
+      }
+
+      const currentTab = document.querySelector('.bottom-nav__item--active');
+      if (currentTab) {
+        activateView(currentTab.dataset.navTarget || 'map');
+      } else {
+        activateView('map');
+      }
+
+      // === Filter Sheet Logic ===
+      const filterTriggerBtn = document.getElementById('filter-trigger-btn');
+      const filterSheet = document.getElementById('filter-sheet');
+      const filterBackdrop = document.getElementById('filter-backdrop');
+      const filterResetBtn = document.getElementById('filter-reset-btn');
+      const filterActiveCount = document.getElementById('filter-active-count');
+      const filterTotalCount = document.getElementById('filter-total-count');
+      const selectAllBtn = document.getElementById('show-all-btn');
+      const categoryChipSelector = '.category-chip[data-category-slug]';
+
+      const getCategoryChips = () => Array.from(document.querySelectorAll(categoryChipSelector));
+      const isChipActive = (chip) => chip.classList.contains('is-active') || chip.getAttribute('aria-pressed') === 'true';
+
+      const updateSelectAllButton = () => {
+        if (!selectAllBtn) return;
+        const chips = getCategoryChips();
+        if (!chips.length) return;
+        const activeChips = chips.filter(isChipActive);
+        const allSelected = activeChips.length === chips.length;
+        selectAllBtn.classList.toggle('show-all-btn--active', allSelected);
+        selectAllBtn.classList.toggle('show-all-btn--off', !allSelected);
+        selectAllBtn.setAttribute('aria-pressed', String(allSelected));
+        const label = selectAllBtn.querySelector('.show-all-btn__icon');
+        if (label) {
+          label.textContent = allSelected ? 'Сбросить все' : 'Выбрать все';
+        }
+        selectAllBtn.dataset.allSelected = String(allSelected);
+      };
+
+      const handleSelectAllClick = (event) => {
+        if (!selectAllBtn) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const chips = getCategoryChips();
+        if (!chips.length) return;
+        const allSelected = selectAllBtn.dataset.allSelected === 'true';
+        if (allSelected) {
+          chips.filter(isChipActive).forEach((chip) => chip.click());
+        } else {
+          chips.filter((chip) => !isChipActive(chip)).forEach((chip) => chip.click());
+        }
+      };
+
+      const openFilterSheet = () => {
+        filterSheet?.classList.add('filter-sheet--open');
+        filterBackdrop?.classList.add('filter-backdrop--visible');
+        filterTriggerBtn?.classList.add('filter-trigger-btn--active');
+        updateSelectAllButton();
+      };
+
+      const closeFilterSheet = () => {
+        filterSheet?.classList.remove('filter-sheet--open');
+        filterBackdrop?.classList.remove('filter-backdrop--visible');
+        filterTriggerBtn?.classList.remove('filter-trigger-btn--active');
+      };
+
+      const updateFilterCounter = () => {
+        if (!filterActiveCount || !filterTotalCount) return;
+        const allChips = document.querySelectorAll('.category-chip[data-category-slug], .category-chip[data-subscribe-chip]');
+        const activeChips = document.querySelectorAll('.category-chip.is-active, .category-chip[aria-pressed="true"]');
+        filterTotalCount.textContent = String(allChips.length);
+        filterActiveCount.textContent = String(activeChips.length);
+      };
+
+      if (selectAllBtn) {
+        selectAllBtn.addEventListener('click', handleSelectAllClick);
+      }
+
+      filterTriggerBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (filterSheet?.classList.contains('filter-sheet--open')) {
+          closeFilterSheet();
+        } else {
+          openFilterSheet();
+        }
+      });
+
+      filterBackdrop?.addEventListener('click', closeFilterSheet);
+
+      filterResetBtn?.addEventListener('click', closeFilterSheet);
+
+      const filterObserver = new MutationObserver(updateFilterCounter);
+      document.querySelectorAll('.category-chip').forEach((chip) => {
+        filterObserver.observe(chip, { attributes: true, attributeFilter: ['class', 'aria-pressed'] });
+        chip.addEventListener('click', () => {
+          setTimeout(updateSelectAllButton, 0);
+        });
+      });
+
+      setTimeout(updateFilterCounter, 100);
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && filterSheet?.classList.contains('filter-sheet--open')) {
+          closeFilterSheet();
+        }
+      });
+    });
+  </script>
 </body>
 </html>

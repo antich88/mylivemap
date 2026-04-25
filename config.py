@@ -86,7 +86,7 @@ BASE_TTL_SECONDS: Dict[str, Optional[int]] = {
     "fishing.spinning": 12 * 3600,
     "fishing.feeder": 12 * 3600,
     "fishing.floating": 12 * 3600,
-    "fishing.boat_ramp": None,
+    "fishing.boat_ramp": 60 * 24 * 3600,
     "community.chat": 3 * 3600,
     "community.coffee": 3 * 3600,
     "community.dating": 3 * 3600,
