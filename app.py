@@ -616,6 +616,11 @@ def create_app() -> Flask:
             pin_id,
             payload.get("rating"),
         )
+        app.logger.info(
+            "DEBUG: Pin data sent to UI: pin_id=%s rating=%s",
+            pin_id,
+            payload.get("rating"),
+        )
         return jsonify(payload)
 
     @app.route("/api/authors/<path:nickname>", methods=["GET"])

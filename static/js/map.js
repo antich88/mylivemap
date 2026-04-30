@@ -1483,7 +1483,7 @@ function createPopupContent(pin) {
   const voteControlsMarkup = renderVoteControls(pin);
   const ratingMarkup = `
     <div class="pin-detail-card__rating">
-      <div class="pin-detail-card__rating-value">${ratingDisplayValue}</div>
+      <div class="pin-detail-card__rating-value pin-popup__rating-value" data-pin-rating-pin="${pin.id}">${ratingDisplayValue}</div>
       <div class="pin-detail-card__rating-scale" aria-hidden="true">
         <span class="pin-detail-card__rating-fill" style="width: ${ratingPercent.toFixed(2)}%;"></span>
       </div>

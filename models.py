@@ -200,6 +200,7 @@ class Pin:
         payload["metadata"] = self.metadata or {}
         payload["category"] = self.category
         payload["user_id"] = self.user_id
+        payload["rating"] = int(self.rating or 0)
         payload["comments"] = self.comments
         likes, dislikes = self.vote_counts
         payload["likes_count"] = likes
