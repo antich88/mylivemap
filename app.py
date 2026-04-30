@@ -611,16 +611,9 @@ def create_app() -> Flask:
             }
         else:
             payload["author"] = None
-        app.logger.info(
-            "pin fetch requested: pin_id=%s rating=%s",
-            pin_id,
-            payload.get("rating"),
-        )
-        app.logger.info(
-            "DEBUG: Pin data sent to UI: pin_id=%s rating=%s",
-            pin_id,
-            payload.get("rating"),
-        )
+        print(f"pin fetch requested: pin_id={pin_id} rating={payload.get('rating')}", flush=True)
+        print(f"DEBUG: Pin data sent to UI: pin_id={pin_id} rating={payload.get('rating')}", flush=True)
+        print(f"ОТПРАВКА НА ФРОНТ: ID {pin_id}, Rating {pin.rating}", flush=True)
         return jsonify(payload)
 
     @app.route("/api/authors/<path:nickname>", methods=["GET"])

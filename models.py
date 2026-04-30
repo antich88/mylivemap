@@ -841,6 +841,7 @@ def record_vote(pin_id: int, user_id: str, vote_value: int) -> Optional[dict]:
                 .values(rating=pins_table.c.rating + pin_update_delta)
             )
             session.execute(update_pin)
+            session.commit()
 
         rating_stmt = select(pins_table.c.rating).where(pins_table.c.id == pin_id)
         updated_rating = session.execute(rating_stmt).scalar_one_or_none()
