@@ -98,7 +98,9 @@ let createSheetState = {
   isOpen: false,
   latlng: null,
   selectedCategorySlug: null,
+  selectedSubcategorySlug: null,
 };
+let currentAuthorSheetPinId = null;
 let createPreviewMarker = null;
 let createSheetElements = null;
 let createSheetInitialized = false;
@@ -126,6 +128,7 @@ function resetCreateSheetState() {
   createSheetState.isOpen = false;
   createSheetState.latlng = null;
   createSheetState.selectedCategorySlug = null;
+  createSheetState.selectedSubcategorySlug = null;
   closeCreateCategoryDropdown();
 }
 
@@ -196,6 +199,8 @@ function setSelectedCategory(slug) {
     return;
   }
   createSheetState.selectedCategorySlug = slug;
+  const [defaultSubcategory] = category.subcategories || [];
+  createSheetState.selectedSubcategorySlug = defaultSubcategory?.slug || `${slug}.default`;
   const labelEl = document.getElementById('create-category-label');
   if (labelEl) {
     labelEl.textContent = category.label || category.name || '';
@@ -865,7 +870,7 @@ function captureOpenPinPopupState() {
   }
 
   const popupEl = document.querySelector(`.pin-popup[data-pin-id="${pinId}"]`);
-  const inputEl = popupEl ? popupEl.querySelector('.pin-comments__form input[name="comment"]') : null;
+  const inputEl = popupEl ? popupEl.querySelector('.pin-comments__form-modern input[name="comment"]') : null;
   const listEl = popupEl ? popupEl.querySelector('.pin-comments__list') : null;
 
   return {
@@ -899,7 +904,7 @@ function restoreOpenPinPopupState(state) {
       return;
     }
 
-    const inputEl = popupEl.querySelector('.pin-comments__form input[name="comment"]');
+    const inputEl = popupEl.querySelector('.pin-comments__form-modern input[name="comment"]');
     if (inputEl) {
       inputEl.value = state.inputValue || '';
       if (typeof state.selectionStart === 'number' && typeof state.selectionEnd === 'number') {
@@ -989,6 +994,23 @@ function getAuthorPanelElements() {
   };
 }
 
+function getAuthorSheetElements() {
+  const sheet = document.getElementById('author-sheet');
+  if (!sheet) {
+    return {};
+  }
+  return {
+    panel: sheet,
+    backdrop: document.getElementById('author-sheet-backdrop'),
+    authorAvatar: sheet.querySelector('[data-author-avatar]'),
+    authorName: sheet.querySelector('[data-author-name]'),
+    authorRating: sheet.querySelector('[data-author-rating]'),
+    authorAge: sheet.querySelector('[data-author-age]'),
+    authorGender: sheet.querySelector('[data-author-gender]'),
+    closeButton: document.getElementById('author-sheet-close'),
+  };
+}
+
 function syncAuthorCloseButtonLabel() {
   const closeBtn = document.querySelector('[data-author-action="close"]');
   if (!closeBtn) {
@@ -1033,8 +1055,8 @@ function formatAuthorGender(value) {
 }
 
 function renderAuthorAvatar(author) {
-  const { authorAvatar, authorName } = getAuthorPanelElements();
-  if (!authorAvatar || !authorName) {
+  const { authorAvatar } = getAuthorSheetElements();
+  if (!authorAvatar) {
     return;
   }
   const nickname = author.nickname || 'Автор';
@@ -1112,7 +1134,7 @@ function toggleAuthorPanelSubscription() {
 }
 
 function updateAuthorPanelContent(author) {
-  const { authorName, authorRating, authorAge, authorGender } = getAuthorPanelElements();
+  const { authorName, authorRating, authorAge, authorGender } = getAuthorSheetElements();
   if (authorName) {
     authorName.textContent = author.nickname || 'Автор';
   }
@@ -1147,19 +1169,102 @@ function bindAuthorPanelSubscribeButton(author) {
   refreshAuthorPanelSubscribeButtonState();
 }
 
-function showAuthorPanel(author) {
-  const { panel, authorView, userContent } = getAuthorPanelElements();
-  if (!panel || !authorView || !userContent) {
+let isAuthorSheetClosing = false;
+let ignoreMapClicksUntil = 0;
+let lastAuthorSheetClosedAt = 0;
+
+function closeAuthorSheet() {
+  const sheet = document.getElementById('author-sheet');
+  const backdrop = document.getElementById('author-sheet-backdrop');
+  const content = document.getElementById('author-sheet-content');
+
+  if (currentAuthorSheetPinId) {
+    stopCommentPolling(currentAuthorSheetPinId);
+    currentAuthorSheetPinId = null;
+  }
+
+  isAuthorSheetClosing = true;
+  ignoreMapClicksUntil = Date.now() + 400;
+  lastAuthorSheetClosedAt = Date.now();
+
+  if (sheet) {
+    sheet.style.transition = 'transform 0.35s cubic-bezier(0.32, 0.72, 0, 1)';
+    sheet.style.transform = 'translateY(100%)';
+    setTimeout(() => {
+      sheet.setAttribute('hidden', '');
+      if (content) {
+        content.innerHTML = '';
+      }
+      sheet.style.transform = '';
+      sheet.style.transition = '';
+      isAuthorSheetClosing = false;
+    }, 350);
+  }
+  if (backdrop) backdrop.setAttribute('hidden', '');
+}
+
+function openAuthorSheet(pin) {
+  if (!pin || !pin.id) {
     return;
   }
-  expandFilterPanel();
+  const sheet = document.getElementById('author-sheet');
+  const backdrop = document.getElementById('author-sheet-backdrop');
+  const content = document.getElementById('author-sheet-content');
+  if (!sheet || !content) {
+    return;
+  }
+
+  if (currentAuthorSheetPinId && currentAuthorSheetPinId !== pin.id) {
+    stopCommentPolling(currentAuthorSheetPinId);
+  }
+  currentAuthorSheetPinId = pin.id;
+
+  content.innerHTML = createPopupContent(pin);
+  attachCommentHandlers(pin.id);
+  initializeCommentsView(pin.id, pin.comments || []);
+  startCommentPolling(pin.id);
+  attachAuthorPopupHandlers({ getElement: () => content }, pin);
+
+  sheet.removeAttribute('hidden');
+  if (backdrop) backdrop.removeAttribute('hidden');
+  sheet.style.transition = 'none';
+  sheet.style.transform = 'translateY(100%)';
+  requestAnimationFrame(() => {
+    sheet.style.transition = 'transform 0.35s cubic-bezier(0.32, 0.72, 0, 1)';
+    sheet.style.transform = 'translateY(0)';
+  });
+
+  if (pin.lat !== undefined && pin.lng !== undefined) {
+    setTimeout(() => {
+      centerMapUnderSheet([pin.lat, pin.lng], sheet);
+    }, 60);
+  }
+}
+
+function centerMapUnderSheet(latlng, sheet) {
+  if (!map || !latlng || !sheet) {
+    return;
+  }
+  const [lat, lng] = latlng;
+  const sheetHeight = sheet.offsetHeight || window.innerHeight * 0.6;
+  const markerPoint = map.project([lat, lng], map.getZoom());
+  const targetPoint = markerPoint.add(L.point(0, Math.floor(sheetHeight / 2)));
+  const targetLatLng = map.unproject(targetPoint, map.getZoom());
+  map.setView(targetLatLng, map.getZoom(), { animate: true, duration: 0.4 });
+}
+
+function showAuthorPanel(author) {
+  const { panel, backdrop } = getAuthorSheetElements();
+  if (!panel) {
+    return;
+  }
   updateAuthorPanelContent(author);
   renderAuthorActivePinsList(author.nickname || '');
-  authorView.classList.remove('is-hidden');
-  userContent.classList.add('is-hidden');
-  panel.setAttribute('data-panel-visible', 'author');
-  toggleUserPanelExpandedState(true, 'author');
   bindAuthorPanelSubscribeButton(author);
+  panel.removeAttribute('hidden');
+  if (backdrop) {
+    backdrop.removeAttribute('hidden');
+  }
 }
 
 function openAuthorPanel(authorId) {
@@ -1296,74 +1401,120 @@ bindAuthorPanelCloseHandler();
 function createPopupContent(pin) {
   const category = getCategoryBySlug(pin.category_slug);
   const currentNickname = currentAuthUser?.nickname || null;
-  const isAuthor = Boolean(currentNickname && pin.user_id && currentNickname === pin.user_id);
-  const deleteButton = isAuthor
-    ? `<button class="delete-pin delete-pin-btn" data-pin-id="${pin.id}">Удалить</button>`
-    : '';
-  const shareUrl = new URL(`/pin/${pin.shared_token}`, window.location.origin).href;
-  const authorIntroMarkup = renderPinAuthorIntro(pin, isAuthor);
-  const voteControlsMarkup = renderVoteControls(pin);
-  const commentsList = renderCommentsList(pin.comments || [], currentNickname, pin.id);
+  const pinnedComments = Array.isArray(pin.comments) ? pin.comments : [];
+  const commentCount = pinnedComments.length;
+  const author = buildPinAuthorInfo(pin);
+  const safeNickname = escapeHtml(author.nickname || 'Автор');
+  const avatarInitial = (safeNickname.charAt(0) || 'A').toUpperCase();
+  const authorAvatarMarkup = author.avatar_url
+    ? `<img src="${escapeHtml(author.avatar_url)}" alt="Аватар ${safeNickname}" loading="lazy" class="pin-detail-card__avatar-img" />`
+    : `<span class="pin-detail-card__avatar-initial">${avatarInitial}</span>`;
+  const ratingSource = Number.isFinite(pin.author?.rating_total) ? pin.author.rating_total : Number.isFinite(pin.rating) ? pin.rating : 0;
+  const boundedRating = Math.max(0, Math.min(ratingSource, 5));
+  const ratingVotesCount = typeof pin.author?.rating_count === 'number'
+    ? pin.author.rating_count
+    : (typeof pin.author?.rating_votes === 'number'
+      ? pin.author.rating_votes
+      : (Number.isFinite(pin.rating_votes) ? pin.rating_votes : null));
+  const hasRating = boundedRating > 0 || (typeof ratingVotesCount === 'number' && ratingVotesCount > 0);
+  const ratingDisplayValue = hasRating ? boundedRating.toFixed(1).replace(/\.0$/, '') : '—';
+  const ratingPercent = hasRating ? Math.max(0, Math.min((boundedRating / 5) * 100, 100)) : 0;
+  const ratingMetaText = (typeof ratingVotesCount === 'number' && ratingVotesCount > 0)
+    ? `${ratingVotesCount} оценок`
+    : 'Оценок пока нет';
+  const commentsList = renderCommentsList(pinnedComments, currentNickname, pin.id);
   const commentForm = renderCommentForm(currentNickname, pin.id);
-  const authorTitleMarkup = `
-    <button
-      type="button"
-      class="pin-popup__author-nickname-btn pin-popup__title-trigger"
-      data-author-panel-trigger
-      data-author-self="${isAuthor ? 'true' : 'false'}"
-      data-author-link
-      data-author-id="${escapeHtml(pin.author?.nickname || pin.user_id || pin.nickname || '')}"
-    >
-      <strong>${escapeHtml(pin.nickname || 'Метка')}</strong>
-    </button>
+  const ttlMinutes = typeof pin.ttl_seconds === 'number' && !Number.isNaN(pin.ttl_seconds)
+    ? Math.max(0, Math.ceil(pin.ttl_seconds / 60))
+    : null;
+  const ttlLabel = ttlMinutes === null ? 'Бессрочно' : `${ttlMinutes} мин.`;
+  const canDeletePin = Boolean(currentNickname && currentNickname === pin.user_id);
+
+  const voteControlsMarkup = renderVoteControls(pin);
+  const ratingMarkup = `
+    <div class="pin-detail-card__rating">
+      <div class="pin-detail-card__rating-value">${ratingDisplayValue}</div>
+      <div class="pin-detail-card__rating-scale" aria-hidden="true">
+        <span class="pin-detail-card__rating-fill" style="width: ${ratingPercent.toFixed(2)}%;"></span>
+      </div>
+      <div class="pin-detail-card__rating-controls">
+        ${voteControlsMarkup}
+      </div>
+    </div>
   `;
 
+  const deleteButtonMarkup = canDeletePin
+    ? `
+      <button type="button" class="pin-popup__delete-pin delete-pin-btn" data-pin-id="${pin.id}">
+        Удалить метку
+      </button>
+    `
+    : '';
+
   return `
-    <div class="pin-popup" data-pin-id="${pin.id}">
-      ${authorIntroMarkup}
-      ${authorTitleMarkup}
-      <p class="pin-popup__category">${category?.icon ?? ''} ${category?.label ?? 'Категория'}</p>
-      <p>${pin.description}</p>
-      <div class="pin-popup__meta">
-        <span>Контакт: ${pin.contact || '—'}</span>
-        <span>
-          Рейтинг: <span class="pin-popup__rating-value" data-pin-rating-value data-pin-rating-pin="${pin.id}">${pin.rating}</span>
-        </span>
+    <div class="pin-popup pin-detail-card" data-pin-id="${pin.id}">
+      <header class="pin-detail-card__header">
+        <div class="pin-detail-card__author-row">
+          <div class="pin-detail-card__author">
+            <div class="pin-detail-card__avatar" aria-hidden="true">
+              ${authorAvatarMarkup}
+            </div>
+            <div class="pin-detail-card__author-meta">
+              <strong class="pin-detail-card__author-name">${safeNickname}</strong>
+            </div>
+          </div>
+          <div class="pin-detail-card__ttl">
+            <span class="pin-detail-card__ttl-icon" aria-hidden="true">⏳</span>
+            <span class="pin-detail-card__ttl-value">${ttlLabel}</span>
+          </div>
+        </div>
+        ${ratingMarkup}
+      </header>
+
+      <div class="pin-detail-card__description">
+        <p>${escapeHtml(pin.description || 'Описание отсутствует.')}</p>
       </div>
-      ${voteControlsMarkup}
-      <p class="pin-popup__ttl">Живёт ещё: ${pin.ttl_seconds ? Math.ceil(pin.ttl_seconds / 60) : '∞'} мин.</p>
-      <div class="pin-popup__actions">
-        <button type="button" class="popup-share${isAuthor ? '' : ' popup-share--single'}" data-share-url="${shareUrl}">Поделиться</button>
-        ${deleteButton}
-      </div>
-      <div class="pin-comments" data-pin-id="${pin.id}">
+
+      <section class="pin-detail-card__discussion pin-comments" data-pin-id="${pin.id}">
         <div class="pin-comments__header">
-          <span>Комментарии</span>
+          <span>💬 Обсуждение</span>
+          <span class="pin-detail-card__message-count">${commentCount}</span>
         </div>
         ${commentsList}
         ${commentForm}
-      </div>
+      </section>
+
+      ${deleteButtonMarkup ? `<div class="pin-detail-card__actions">${deleteButtonMarkup}</div>` : ''}
     </div>
   `;
 }
 
 function renderCommentsList(comments, currentNickname, pinId) {
-  const hasComments = Array.isArray(comments) && comments.length > 0;
-  if (!hasComments) {
+  const normalizedComments = Array.isArray(comments) ? comments : [];
+  if (!normalizedComments.length) {
     return '<div class="pin-comments__empty">Комментариев пока нет</div>';
   }
-  const items = comments
+  const items = normalizedComments
     .map((comment) => {
-      const canDelete = currentNickname && currentNickname === comment.user_id;
+      const canDelete = Boolean(currentNickname && currentNickname === comment.user_id);
+      const isOwn = canDelete;
+      const authorName = escapeHtml(comment.user_id || 'Аноним');
+      const body = escapeHtml(comment.text || '');
+      const time = formatTimestamp(comment.timestamp);
+      const deleteButton = canDelete
+        ? `<button type="button" class="pin-comment__delete" data-pin-id="${pinId}" data-comment-id="${comment.id}" aria-label="Удалить комментарий">Удалить</button>`
+        : '';
       return `
-        <div class="pin-comment" data-comment-id="${comment.id}">
-          <div class="pin-comment__text">
-            <span class="pin-comment__author">${comment.user_id || 'Аноним'}:</span>
-            <span class="pin-comment__body">${escapeHtml(comment.text)}</span>
-          </div>
-          <div class="pin-comment__meta">
-            <span class="pin-comment__time">${formatTimestamp(comment.timestamp)}</span>
-            ${canDelete ? `<button class="pin-comment__delete" data-pin-id="${pinId}" data-comment-id="${comment.id}" title="Удалить комментарий">✖</button>` : ''}
+        <div class="pin-comment ${isOwn ? 'pin-comment--own' : 'pin-comment--other'}" data-comment-id="${comment.id}">
+          <div class="pin-comment__bubble">
+            <div class="pin-comment__bubble-header">
+              <div class="pin-comment__bubble-meta">
+                <span class="pin-comment__author">${authorName}</span>
+                <span class="pin-comment__time">${time}</span>
+              </div>
+              ${deleteButton}
+            </div>
+            <p class="pin-comment__body">${body}</p>
           </div>
         </div>
       `;
@@ -1458,33 +1609,40 @@ function buildCommentElement(comment, pinId, canDelete) {
   wrapper.className = 'pin-comment';
   wrapper.dataset.commentId = comment.id;
 
-  const textBlock = document.createElement('div');
-  textBlock.className = 'pin-comment__text';
+  const bubble = document.createElement('div');
+  bubble.className = 'pin-comment__bubble';
+
+  const header = document.createElement('div');
+  header.className = 'pin-comment__bubble-header';
+
+  const meta = document.createElement('div');
+  meta.className = 'pin-comment__bubble-meta';
   const authorEl = document.createElement('span');
   authorEl.className = 'pin-comment__author';
-  authorEl.textContent = `${comment.user_id || 'Аноним'}:`;
-  const bodyEl = document.createElement('span');
-  bodyEl.className = 'pin-comment__body';
-  bodyEl.textContent = comment.text || '';
-  textBlock.append(authorEl, bodyEl);
-
-  const metaEl = document.createElement('div');
-  metaEl.className = 'pin-comment__meta';
+  authorEl.textContent = comment.user_id || 'Аноним';
   const timeEl = document.createElement('span');
   timeEl.className = 'pin-comment__time';
   timeEl.textContent = formatTimestamp(comment.timestamp);
-  metaEl.appendChild(timeEl);
+  meta.append(authorEl, timeEl);
+
+  header.appendChild(meta);
   if (canDelete) {
     const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
     deleteBtn.className = 'pin-comment__delete';
     deleteBtn.dataset.pinId = String(pinId);
     deleteBtn.dataset.commentId = comment.id;
-    deleteBtn.title = 'Удалить комментарий';
-    deleteBtn.textContent = '✖';
-    metaEl.appendChild(deleteBtn);
+    deleteBtn.setAttribute('aria-label', 'Удалить комментарий');
+    deleteBtn.textContent = 'Удалить';
+    header.appendChild(deleteBtn);
   }
 
-  wrapper.append(textBlock, metaEl);
+  const bodyEl = document.createElement('p');
+  bodyEl.className = 'pin-comment__body';
+  bodyEl.textContent = comment.text || '';
+
+  bubble.append(header, bodyEl);
+  wrapper.appendChild(bubble);
   return wrapper;
 }
 
@@ -1610,9 +1768,11 @@ function renderCommentForm(currentNickname, pinId) {
     return '<div class="pin-comments__hint">Войдите, чтобы написать комментарий.</div>';
   }
   return `
-    <form class="pin-comments__form" data-pin-id="${pinId}">
-      <input type="text" name="comment" maxlength="${COMMENT_MAX_LENGTH}" placeholder="Написать..." autocomplete="off" />
-      <button type="submit">Отправить</button>
+    <form class="pin-comments__form-modern" data-pin-id="${pinId}">
+      <input type="text" name="comment" placeholder="Написать..." maxlength="${COMMENT_MAX_LENGTH}" autocomplete="off" />
+      <button type="submit" class="comment-send-btn" aria-label="Отправить" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+      </button>
     </form>
   `;
 }
@@ -3029,6 +3189,7 @@ function handleCreateSheetSubmit(event) {
   const contactInput = document.getElementById('create-contact-input');
   const submitButton = document.getElementById('create-sheet-submit');
   const selectedCategory = createSheetState?.selectedCategorySlug;
+  const selectedSubcategory = createSheetState?.selectedSubcategorySlug;
   const latlng = createSheetState?.latlng;
 
   const nickname = titleInput?.value?.trim() || '';
@@ -3043,6 +3204,10 @@ function handleCreateSheetSubmit(event) {
     alert('Выберите категорию.');
     return;
   }
+  if (!selectedSubcategory) {
+    alert('Не удалось определить подкатегорию для выбранной категории.');
+    return;
+  }
   if (!latlng) {
     alert('Не выбрана точка на карте.');
     return;
@@ -3051,7 +3216,7 @@ function handleCreateSheetSubmit(event) {
   const payload = {
     category: selectedCategory,
     category_slug: selectedCategory,
-    subcategory_slug: selectedCategory,
+    subcategory_slug: selectedSubcategory,
     nickname,
     description: description || '',
     contact: contact || null,
@@ -3109,8 +3274,13 @@ function createMarkerLabelIcon(pin) {
   const category = getCategoryBySlug(pin.category_slug);
   const categoryColor = category?.color || pin.color || '#ffffff';
   const markerTitle = escapeHtml(pin.title || pin.nickname || 'Метка');
+
+  // Получаем прозрачность на основе оставшегося времени (максимум 0.9, минимум 0.2)
+  const opacities = computeOpacityFromTTL(pin.ttl_seconds);
+  const currentOpacity = opacities.strokeOpacity;
+
   const markerHtml = `
-    <div class="custom-marker-label" style="--chip-color: ${categoryColor}">
+    <div class="custom-marker-label" style="--chip-color: ${categoryColor}; opacity: ${currentOpacity};">
       <span class="marker-status-dot" aria-hidden="true"></span>
       <span class="marker-text">${markerTitle}</span>
     </div>
@@ -3135,39 +3305,10 @@ function addPinToMap(pin) {
   marker.pinData = pin;
   const tooltipText = pin.title || pin.nickname || 'Метка';
   marker.bindTooltip(tooltipText, { sticky: true });
-  if (isTouchDevice) {
-    let tooltipVisible = false;
-    marker.on('click', (event) => {
-      L.DomEvent.stopPropagation(event);
-      if (!tooltipVisible) {
-        marker.openTooltip();
-        tooltipVisible = true;
-      } else {
-        marker.openPopup();
-        tooltipVisible = false;
-      }
-    });
-    marker.on('popupopen', () => {
-      tooltipVisible = false;
-    });
-  }
-  marker.bindPopup(createPopupContent(pin), {
-    className: 'pin-popup-wrapper',
+  marker.on('click', (event) => {
+    L.DomEvent.stopPropagation(event);
+    openAuthorSheet(pin);
   });
-  marker.on('popupopen', () => {
-    collapseDesktopPanels();
-    attachCommentHandlers(marker.pinId);
-    initializeCommentsView(marker.pinId, marker.pinData?.comments || []);
-    startCommentPolling(marker.pinId);
-    minimizeFilterPanelForPinPopup();
-    centerPinPopupOnMobile(marker.pinId);
-    attachAuthorPopupHandlers(marker.getPopup(), pin);
-  });
-  marker.on('popupclose', () => {
-    collapseDesktopPanels();
-    stopCommentPolling(marker.pinId);
-  });
-  marker.on('popupopen', (event) => applyPopupFadeEffect(event.popup));
   if (activeCategorySlugs.has(pin.category_slug)) {
     marker.addTo(map);
   }
@@ -3246,7 +3387,23 @@ function findUserLocation() {
   );
 }
 
+function closePinPopupIfOpen(pinId) {
+  const entry = getActiveMarkerEntry(pinId);
+  if (entry && entry.marker && typeof entry.marker.closePopup === 'function') {
+    entry.marker.closePopup();
+    return;
+  }
+  const popupEl = document.querySelector(`.pin-popup[data-pin-id="${pinId}"]`);
+  if (popupEl) {
+    const popup = popupEl.closest('.leaflet-popup');
+    if (popup && popup.parentNode) {
+      popup.parentNode.removeChild(popup);
+    }
+  }
+}
+
 function removePinFromMap(pinId) {
+  closePinPopupIfOpen(pinId);
   const index = activeMarkers.findIndex(({ marker }) => marker.pinId === pinId);
   if (index !== -1) {
     const { marker } = activeMarkers[index];
@@ -3269,8 +3426,12 @@ function applyCategoryFilters() {
 }
 
 function isAnyExistingPinPopupOpen() {
+  const sheet = document.getElementById('author-sheet');
+  if (sheet && !sheet.hasAttribute('hidden') && currentAuthorSheetPinId) {
+    return true;
+  }
   return activeMarkers.some(({ marker }) => {
-    const popup = marker.getPopup();
+    const popup = typeof marker.getPopup === 'function' ? marker.getPopup() : null;
     return popup && map.hasLayer(popup);
   });
 }
@@ -3353,6 +3514,9 @@ window.addEventListener('load', function () {
     let isDraggingSheet = false;
 
     createSheetEl.addEventListener('touchstart', (e) => {
+      if (e.target.closest('.create-sheet__close')) {
+        return;
+      }
       if (e.target.closest('.create-sheet__drag-handle') || e.target.closest('.create-sheet__header')) {
         startY = e.touches[0].clientY;
         isDraggingSheet = true;
@@ -3362,12 +3526,15 @@ window.addEventListener('load', function () {
 
     createSheetEl.addEventListener('touchmove', (e) => {
       if (!isDraggingSheet) return;
+      if (e.cancelable) {
+        e.preventDefault();
+      }
       currentY = e.touches[0].clientY;
       const deltaY = currentY - startY;
       if (deltaY > 0) {
         createSheetEl.style.transform = `translateY(${deltaY}px)`;
       }
-    }, { passive: true });
+    }, { passive: false });
 
     createSheetEl.addEventListener('touchend', () => {
       if (!isDraggingSheet) return;
@@ -3392,6 +3559,71 @@ window.addEventListener('load', function () {
     });
   }
 
+  const authorSheetEl = document.getElementById('author-sheet');
+  const authorBackdrop = document.getElementById('author-sheet-backdrop');
+  const authorCloseBtn = document.getElementById('author-sheet-close');
+  if (authorSheetEl) {
+    let startAuthorY = 0;
+    let currentAuthorY = 0;
+    let isDraggingAuthor = false;
+
+    authorSheetEl.addEventListener('touchstart', (e) => {
+      if (e.target.closest('.create-sheet__close')) {
+        return;
+      }
+      if (e.target.closest('.create-sheet__drag-handle') || e.target.closest('.create-sheet__header')) {
+        startAuthorY = e.touches[0].clientY;
+        currentAuthorY = startAuthorY;
+        isDraggingAuthor = true;
+        authorSheetEl.style.transition = 'none';
+      }
+    }, { passive: true });
+
+    authorSheetEl.addEventListener('touchmove', (e) => {
+      if (!isDraggingAuthor) return;
+      if (e.cancelable) {
+        e.preventDefault();
+      }
+      currentAuthorY = e.touches[0].clientY;
+      const deltaY = currentAuthorY - startAuthorY;
+      if (deltaY > 0) {
+        authorSheetEl.style.transform = `translateY(${deltaY}px)`;
+      }
+    }, { passive: false });
+
+    authorSheetEl.addEventListener('touchend', () => {
+      if (!isDraggingAuthor) return;
+      isDraggingAuthor = false;
+      const deltaY = currentAuthorY - startAuthorY;
+
+      if (deltaY > 80) {
+        authorSheetEl.style.transform = '';
+        authorSheetEl.style.transition = '';
+        closeAuthorSheet();
+      } else {
+        authorSheetEl.style.transition = 'transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)';
+        authorSheetEl.style.transform = 'translateY(0)';
+        setTimeout(() => {
+          if (!authorSheetEl.hasAttribute('hidden')) {
+            authorSheetEl.style.transform = '';
+            authorSheetEl.style.transition = '';
+          }
+        }, 300);
+      }
+    });
+
+    if (authorCloseBtn) {
+      authorCloseBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        closeAuthorSheet();
+      });
+    }
+    if (authorBackdrop) {
+      authorBackdrop.addEventListener('click', () => closeAuthorSheet());
+    }
+  }
+
   if (panelHandleContainer) {
     panelHandleContainer.addEventListener('click', (event) => {
       if (ignorePanelHandleClick) {
@@ -3410,6 +3642,9 @@ window.addEventListener('load', function () {
   }
 
   map.on('click', function (e) {
+    if (isAuthorSheetClosing || Date.now() < ignoreMapClicksUntil || Date.now() - lastAuthorSheetClosedAt < 500) {
+      return;
+    }
     logFilterPanelState('map-click-start', { lat: e?.latlng?.lat, lng: e?.latlng?.lng });
     collapseDesktopPanels();
     if (!isAuthenticated()) {
@@ -3566,7 +3801,7 @@ document.addEventListener('click', function (e) {
     openAuthorFromSubscription(nickname);
     return;
   }
-  const voteBtn = e.target.closest('.pin-vote-btn');
+  const voteBtn = e.target.closest('.pin-vote-button');
   if (voteBtn) {
     e.preventDefault();
     const pinId = Number(voteBtn.dataset.pinId);
@@ -3589,6 +3824,17 @@ document.addEventListener('click', function (e) {
       .then((payload) => {
         currentUserVotes.set(pinId, targetValue);
         updatePopupRating(pinId, payload.pin_rating);
+        const voteButtons = document.querySelector(`.pin-popup__vote-buttons[data-pin-id="${pinId}"]`);
+        if (voteButtons) {
+          const likesElem = voteButtons.querySelector('[data-pin-likes-count]');
+          const dislikesElem = voteButtons.querySelector('[data-pin-dislikes-count]');
+          if (likesElem && Number.isFinite(payload.likes_count)) {
+            likesElem.textContent = payload.likes_count;
+          }
+          if (dislikesElem && Number.isFinite(payload.dislikes_count)) {
+            dislikesElem.textContent = payload.dislikes_count;
+          }
+        }
         if (typeof payload.profile_rating !== 'undefined') {
           updateProfileRating(payload.profile_rating);
         }
@@ -3596,16 +3842,23 @@ document.addEventListener('click', function (e) {
         const entry = getActiveMarkerEntry(pinId);
         if (entry && entry.pin) {
           entry.pin.rating = Number.isFinite(payload.pin_rating) ? payload.pin_rating : entry.pin.rating;
-          entry.pinData = { ...entry.pinData, rating: entry.pin.rating };
+          entry.pin.likes_count = Number.isFinite(payload.likes_count) ? payload.likes_count : entry.pin.likes_count;
+          entry.pin.dislikes_count = Number.isFinite(payload.dislikes_count) ? payload.dislikes_count : entry.pin.dislikes_count;
+          entry.pinData = {
+            ...entry.pinData,
+            rating: entry.pin.rating,
+            likes_count: entry.pin.likes_count,
+            dislikes_count: entry.pin.dislikes_count,
+          };
         }
       })
-      .catch((error) => {
-        console.error('Vote failed', error);
-        showUserToast(error.message || 'Не удалось отправить голос.');
-      })
-      .finally(() => {
-        voteInFlightPins.delete(pinId);
-      });
+    .catch((error) => {
+      console.error('Vote failed', error);
+      showUserToast(error.message || 'Не удалось отправить голос.');
+    })
+    .finally(() => {
+      voteInFlightPins.delete(pinId);
+    });
     return;
   }
 
@@ -3649,8 +3902,18 @@ document.addEventListener('click', function (e) {
   }
 });
 
+document.addEventListener('input', (event) => {
+  if (event.target.matches('.pin-comments__form-modern input[name="comment"]')) {
+    const form = event.target.closest('.pin-comments__form-modern');
+    const btn = form?.querySelector('.comment-send-btn');
+    if (btn) {
+      btn.disabled = event.target.value.trim().length === 0;
+    }
+  }
+});
+
 document.addEventListener('submit', (event) => {
-  const form = event.target.closest('.pin-comments__form');
+  const form = event.target.closest('.pin-comments__form-modern');
   if (!form) {
     return;
   }
@@ -3676,7 +3939,7 @@ function attachCommentHandlers(pinId) {
   if (!popup) {
     return;
   }
-  const form = popup.querySelector('.pin-comments__form');
+  const form = popup.querySelector('.pin-comments__form-modern');
   if (form) {
     const input = form.querySelector('input[name="comment"]');
     if (input && isTouchDevice) {
@@ -3796,12 +4059,24 @@ function collapseFilterPanelAnimated() {
 }
 function renderVoteControls(pin) {
   const currentValue = currentUserVotes.get(pin.id) || 0;
-  const upActiveClass = currentValue === 1 ? 'pin-vote-btn--active' : '';
-  const downActiveClass = currentValue === -1 ? 'pin-vote-btn--active' : '';
+  const likes = Number.isFinite(pin.likes_count) ? pin.likes_count : 0;
+  const dislikes = Number.isFinite(pin.dislikes_count) ? pin.dislikes_count : 0;
+  const upActiveClass = currentValue === 1 ? 'pin-vote-button--active' : '';
+  const downActiveClass = currentValue === -1 ? 'pin-vote-button--active' : '';
   return `
-    <div class="pin-popup__vote-controls" data-pin-id="${pin.id}">
-      <button type="button" class="pin-vote-btn pin-vote-btn--up ${upActiveClass}" data-pin-id="${pin.id}" data-vote-direction="up" aria-pressed="${currentValue === 1}" aria-label="Поставить лайк">▲</button>
-      <button type="button" class="pin-vote-btn pin-vote-btn--down ${downActiveClass}" data-pin-id="${pin.id}" data-vote-direction="down" aria-pressed="${currentValue === -1}" aria-label="Поставить дизлайк">▼</button>
+    <div class="pin-popup__vote-buttons" data-pin-id="${pin.id}">
+      <button type="button" class="pin-vote-button pin-vote-button--up ${upActiveClass}" data-pin-id="${pin.id}" data-vote-direction="up" aria-pressed="${currentValue === 1}" aria-label="Поставить лайк">
+        <span class="pin-vote-button__icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>
+        </span>
+        <span class="pin-vote-button__count" data-pin-likes-count>${likes}</span>
+      </button>
+      <button type="button" class="pin-vote-button pin-vote-button--down ${downActiveClass}" data-pin-id="${pin.id}" data-vote-direction="down" aria-pressed="${currentValue === -1}" aria-label="Поставить дизлайк">
+        <span class="pin-vote-button__icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>
+        </span>
+        <span class="pin-vote-button__count" data-pin-dislikes-count>${dislikes}</span>
+      </button>
     </div>
   `;
 }
@@ -3844,11 +4119,15 @@ function refreshPinPopup(pinId) {
   if (!popup) {
     return;
   }
-  const voteControls = popup.querySelector('.pin-popup__vote-controls');
+  const voteControls = popup.querySelector('.pin-popup__vote-buttons');
   if (!voteControls) {
     return;
   }
-  const newMarkup = renderVoteControls({ id: pinId });
+  const likesElem = voteControls.querySelector('[data-pin-likes-count]');
+  const dislikesElem = voteControls.querySelector('[data-pin-dislikes-count]');
+  const likes = likesElem ? Number(likesElem.textContent.trim()) : 0;
+  const dislikes = dislikesElem ? Number(dislikesElem.textContent.trim()) : 0;
+  const newMarkup = renderVoteControls({ id: pinId, likes_count: likes, dislikes_count: dislikes });
   voteControls.outerHTML = newMarkup;
 }
 

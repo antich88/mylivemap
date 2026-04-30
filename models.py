@@ -201,12 +201,24 @@ class Pin:
         payload["category"] = self.category
         payload["user_id"] = self.user_id
         payload["comments"] = self.comments
+        likes, dislikes = self.vote_counts
+        payload["likes_count"] = likes
+        payload["dislikes_count"] = dislikes
         return payload
 
     @property
     def comments(self) -> List[Dict[str, str]]:
         metadata = self.metadata or {}
         return _normalize_comments(metadata.get("comments"))
+
+    @property
+    def vote_entries(self) -> List[Dict[str, Any]]:
+        metadata = self.metadata or {}
+        return _ensure_votes_container(metadata).get("votes", [])
+
+    @property
+    def vote_counts(self) -> tuple[int, int]:
+        return _count_vote_entries(self.vote_entries)
 
 
 def _normalize_comments(raw_comments: Any) -> List[Dict[str, str]]:
@@ -421,6 +433,56 @@ def _serialize_local_record(record: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(expires_at, datetime):
         payload["expires_at"] = expires_at.isoformat()
     return payload
+
+
+def _count_vote_entries(entries: Sequence[Mapping[str, Any]]) -> tuple[int, int]:
+    likes = 0
+    dislikes = 0
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        vote_value = entry.get("vote_value")
+        try:
+            vote_value = int(vote_value)
+        except (TypeError, ValueError):
+            continue
+        if vote_value == 1:
+            likes += 1
+        elif vote_value == -1:
+            dislikes += 1
+    return likes, dislikes
+
+
+def vote_counts_for_pin(
+    pin_id: int,
+    metadata: Optional[Dict[str, Any]] = None,
+    *,
+    session: object | None = None,
+) -> tuple[int, int]:
+    if LOCAL_MODE:
+        data = metadata or {}
+        votes = _ensure_votes_container(data).get("votes", [])
+        return _count_vote_entries(votes)
+
+    from sqlalchemy import func, select
+
+    def _load_counts(active_session: object) -> tuple[int, int]:
+        likes_stmt = (
+            select(func.count())
+            .where(votes_table.c.pin_id == pin_id, votes_table.c.vote_value == 1)
+        )
+        dislikes_stmt = (
+            select(func.count())
+            .where(votes_table.c.pin_id == pin_id, votes_table.c.vote_value == -1)
+        )
+        likes = active_session.execute(likes_stmt).scalar_one_or_none() or 0
+        dislikes = active_session.execute(dislikes_stmt).scalar_one_or_none() or 0
+        return int(likes), int(dislikes)
+
+    if session is None:
+        with session_scope() as scoped_session:
+            return _load_counts(scoped_session)
+    return _load_counts(session)
 
 
 def create_pin(
@@ -705,6 +767,7 @@ def record_vote(pin_id: int, user_id: str, vote_value: int) -> Optional[dict]:
             _LOCAL_STORE.persist(snapshot)
             pin_owner = str(record.get("user_id") or "")
             profile_rating = get_user_rating_total(pin_owner)
+            likes_count, dislikes_count = vote_counts_for_pin(pin_id, metadata, session=None)
             logger.debug(
                 "record_vote (local): pin=%s user=%s prev=%s new=%s delta=%s profile_rating=%s",
                 pin_id,
@@ -719,6 +782,8 @@ def record_vote(pin_id: int, user_id: str, vote_value: int) -> Optional[dict]:
                 "vote_value": vote_value,
                 "profile_rating": profile_rating,
                 "pin_owner": pin_owner,
+                "likes_count": likes_count,
+                "dislikes_count": dislikes_count,
             }
         return None
 
@@ -779,6 +844,7 @@ def record_vote(pin_id: int, user_id: str, vote_value: int) -> Optional[dict]:
         rating_stmt = select(pins_table.c.rating).where(pins_table.c.id == pin_id)
         updated_rating = session.execute(rating_stmt).scalar_one_or_none()
         profile_rating = get_user_rating_total(owner)
+        likes_count, dislikes_count = vote_counts_for_pin(pin_id, session=session)
         logger.debug(
             "record_vote: pin=%s user=%s prev=%s new=%s delta=%s profile_rating=%s",
             pin_id,
@@ -793,6 +859,8 @@ def record_vote(pin_id: int, user_id: str, vote_value: int) -> Optional[dict]:
             "vote_value": vote_value,
             "profile_rating": profile_rating,
             "pin_owner": owner,
+            "likes_count": int(likes_count),
+            "dislikes_count": int(dislikes_count),
         }
 
 

@@ -699,6 +699,8 @@ def create_app() -> Flask:
             "pin_rating": result["pin_rating"],
             "vote_value": result["vote_value"],
             "pin_owner": result["pin_owner"],
+            "likes_count": result.get("likes_count"),
+            "dislikes_count": result.get("dislikes_count"),
         }
         if result.get("profile_rating") is not None and result["pin_owner"] == user["nickname"]:
             response_payload["profile_rating"] = result["profile_rating"]

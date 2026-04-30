@@ -196,62 +196,6 @@
 
             <div id="auth-message" class="user-panel__message" role="status" aria-live="polite"></div>
 
-            <section class="user-panel__author-view is-hidden" aria-label="Информация об авторе" data-author-view>
-              <div class="user-panel__author-view-header">
-                <button
-                  type="button"
-                  class="author-view__close"
-                  data-author-action="close"
-                  data-author-close-auth="← Назад к профилю"
-                  data-author-close-guest="← Назад"
-                >
-                  ← Назад к профилю
-                </button>
-              </div>
-              <div class="user-panel__author-view-body">
-                <div class="pin-popup__author user-panel__author-intro">
-                  <div class="pin-popup__author-avatar" aria-hidden="true" data-author-avatar>
-                    <span class="pin-popup__author-avatar-placeholder">А</span>
-                  </div>
-                  <div class="pin-popup__author-info">
-                    <span class="pin-popup__author-nickname" data-author-name>Автор</span>
-                  </div>
-                  <button
-                    type="button"
-                    class="author-panel__subscribe-btn"
-                    data-author-subscribe="true"
-                    data-author-nickname=""
-                  >Подписаться</button>
-                </div>
-                <div class="profile-view-state author-panel__profile-view">
-                  <p class="profile-view-state__nickname" data-author-name>Автор</p>
-                  <div class="profile-view-state__meta">
-                    <span class="profile-view-state__meta-item">
-                      <span class="profile-view-state__meta-label">Возраст</span>
-                      <span class="profile-view-state__meta-value" data-author-age>—</span>
-                    </span>
-                    <span class="profile-view-state__meta-item">
-                      <span class="profile-view-state__meta-label">Пол</span>
-                      <span class="profile-view-state__meta-value" data-author-gender>—</span>
-                    </span>
-                    <span class="profile-view-state__meta-item">
-                      <span class="profile-view-state__meta-label">Рейтинг</span>
-                      <span class="profile-view-state__meta-value" data-author-rating>—</span>
-                    </span>
-                  </div>
-                </div>
-                <div class="user-panel__active-pins author-panel__active-pins" data-author-active-pins>
-                  <div class="user-panel__active-pins-header">
-                    <h3 class="user-panel__active-pins-title">Активные точки</h3>
-                    <span class="user-panel__active-pins-count" data-author-active-pins-count>0/5</span>
-                  </div>
-                  <div class="user-panel__active-pins-list" data-author-active-pins-list>
-                    <p class="user-panel__active-pins-empty">Точки пока не отображаются.</p>
-                  </div>
-                </div>
-              </div>
-            </section>
-
             <div class="user-panel__content user-panel__user-content {% if not current_user %}is-hidden{% endif %}" data-user-content>
               <div class="user-panel__settings">
                 <form id="profile-form" class="profile-form" autocomplete="off">
@@ -516,10 +460,9 @@
   <!-- Bottom Sheet "Новая метка" -->
   <div class="create-sheet" id="create-sheet" role="dialog" aria-modal="true" aria-labelledby="create-sheet-title" hidden>
     <div class="create-sheet__drag-handle" aria-hidden="true"></div>
-    <div class="create-sheet__header">
-      <h2 class="create-sheet__title" id="create-sheet-title">Новая метка</h2>
-      <button type="button" class="create-sheet__close" id="create-sheet-close" aria-label="Закрыть">✕</button>
-    </div>
+  <div class="create-sheet__header">
+    <button type="button" class="create-sheet__close" id="create-sheet-close" aria-label="Закрыть">✕</button>
+  </div>
 
     <form class="create-sheet__form" id="create-sheet-form" autocomplete="off">
       <!-- Категория (dropdown) -->
@@ -580,6 +523,15 @@
       <!-- Кнопка сохранения -->
       <button type="submit" class="create-sheet__submit" id="create-sheet-submit">Создать метку</button>
     </form>
+  </div>
+
+  <div class="create-sheet-backdrop" id="author-sheet-backdrop" hidden></div>
+  <div class="create-sheet" id="author-sheet" hidden>
+  <div class="create-sheet__drag-handle"></div>
+  <div class="create-sheet__header" style="margin-bottom: 0;">
+    <button type="button" class="create-sheet__close" id="author-sheet-close" style="margin-left: auto;">✕</button>
+  </div>
+    <div class="create-sheet__form author-sheet__content" id="author-sheet-content"></div>
   </div>
   <script id="live-map-bootstrap" type="application/json">
     {{ bootstrap_json | safe }}
@@ -690,10 +642,20 @@
         updateSelectAllButton();
       };
 
+      const logFilterTouch = (label, detail) => {
+        if (typeof console !== 'undefined' && console.debug) {
+          console.debug('[filter-swipe]', label, detail);
+        }
+      };
+
       const closeFilterSheet = () => {
         filterSheet?.classList.remove('filter-sheet--open');
         filterBackdrop?.classList.remove('filter-backdrop--visible');
         filterTriggerBtn?.classList.remove('filter-trigger-btn--active');
+        if (filterSheet) {
+          filterSheet.style.transform = '';
+          filterSheet.style.transition = '';
+        }
       };
 
       const updateFilterCounter = () => {
@@ -720,6 +682,60 @@
       filterBackdrop?.addEventListener('click', closeFilterSheet);
 
       filterResetBtn?.addEventListener('click', closeFilterSheet);
+
+      // --- ЛОГИКА СВАЙПА ДЛЯ ЗАКРЫТИЯ ВЕРХНЕЙ ПАНЕЛИ ---
+      if (filterSheet) {
+        let startY = 0;
+        let currentY = 0;
+        let isDraggingFilter = false;
+
+        filterSheet.addEventListener('touchstart', (e) => {
+          // Захватываем хэндл, кнопки, заголовок и даже пустое пространство панели (padding)
+          if (e.target.closest('.filter-sheet__handle') || 
+              e.target.closest('.filter-sheet__actions') || 
+              e.target.closest('.filter-sheet__header') || 
+              e.target === filterSheet) {
+            startY = e.touches[0].clientY;
+            currentY = startY;
+            isDraggingFilter = true;
+            filterSheet.style.transition = 'none';
+          }
+        }, { passive: true });
+
+        filterSheet.addEventListener('touchmove', (e) => {
+          if (!isDraggingFilter) return;
+          // ЖЕСТКО блокируем нативный скролл браузера
+          if (e.cancelable) {
+            e.preventDefault();
+          }
+          currentY = e.touches[0].clientY;
+          const deltaY = currentY - startY;
+          if (deltaY < 0) {
+            filterSheet.style.transform = `translateY(${deltaY}px)`;
+          }
+        }, { passive: false }); // ВАЖНО: passive false нужен для работы preventDefault
+
+        filterSheet.addEventListener('touchend', () => {
+          if (!isDraggingFilter) return;
+          isDraggingFilter = false;
+          const deltaY = currentY - startY;
+
+          if (deltaY < -60) {
+            filterSheet.style.transform = '';
+            filterSheet.style.transition = '';
+            closeFilterSheet();
+          } else {
+            filterSheet.style.transition = 'transform 0.35s cubic-bezier(0.32, 0.72, 0, 1)';
+            filterSheet.style.transform = 'translateY(0)';
+            setTimeout(() => {
+              if (filterSheet.classList.contains('filter-sheet--open')) {
+                filterSheet.style.transform = '';
+                filterSheet.style.transition = '';
+              }
+            }, 350);
+          }
+        });
+      }
 
       const filterObserver = new MutationObserver(updateFilterCounter);
       document.querySelectorAll('.category-chip').forEach((chip) => {

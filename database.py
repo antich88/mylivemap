@@ -91,7 +91,11 @@ else:
         **_sqlite_kwargs(DATABASE_URL),
     }
 
-    if DATABASE_URL.startswith("postgres"):
+    engine_url = DATABASE_URL or ""
+    if engine_url.startswith("postgres://"):
+        engine_url = "postgresql://" + engine_url[len("postgres://"):]
+
+    if engine_url.startswith("postgres"):
         try:  # pragma: no cover
             import psycopg2  # type: ignore  # noqa: F401
         except ImportError as exc:  # pragma: no cover
@@ -99,7 +103,7 @@ else:
                 "psycopg2-binary должен быть установлен для подключения к Postgres"
             ) from exc
 
-    ENGINE = create_engine(DATABASE_URL, **engine_kwargs)
+    ENGINE = create_engine(engine_url, **engine_kwargs)
 
     SessionLocal = sessionmaker(
         bind=ENGINE,
@@ -221,12 +225,11 @@ else:
             return
         inspector = inspect(ENGINE)
         table_names = set(inspector.get_table_names())
-        if "friendships" not in table_names:
-            metadata.create_all(ENGINE, tables=[friendships_table])
-            table_names.add("friendships")
-        if "user_subscriptions" not in table_names:
-            metadata.create_all(ENGINE, tables=[user_subscriptions_table])
-            table_names.add("user_subscriptions")
+        for table in metadata.sorted_tables:
+            if table.name in table_names:
+                continue
+            metadata.create_all(ENGINE, tables=[table])
+            table_names.add(table.name)
         if "pins" not in table_names:
             return
         columns = {col["name"] for col in inspector.get_columns("pins")}
