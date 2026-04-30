@@ -1203,7 +1203,37 @@ function closeAuthorSheet() {
   if (backdrop) backdrop.setAttribute('hidden', '');
 }
 
-function openAuthorSheet(pin) {
+function fetchPinDetails(pinId) {
+  if (!pinId) {
+    return Promise.resolve(null);
+  }
+  return fetch(`/api/pins/${pinId}`, { credentials: 'same-origin' })
+    .then(handleJsonResponse)
+    .catch((error) => {
+      console.error('Не удалось получить свежую метку', error);
+      return null;
+    });
+}
+
+function updateActiveMarkerEntry(pin) {
+  if (!pin || !pin.id) {
+    return;
+  }
+  const entry = getActiveMarkerEntry(pin.id);
+  if (!entry) {
+    return;
+  }
+  entry.pin = pin;
+  entry.pinData = {
+    ...entry.pinData,
+    ...pin,
+    rating: pin.rating,
+    likes_count: pin.likes_count,
+    dislikes_count: pin.dislikes_count,
+  };
+}
+
+function renderAuthorSheetForPin(pin) {
   if (!pin || !pin.id) {
     return;
   }
@@ -1213,11 +1243,6 @@ function openAuthorSheet(pin) {
   if (!sheet || !content) {
     return;
   }
-
-  if (currentAuthorSheetPinId && currentAuthorSheetPinId !== pin.id) {
-    stopCommentPolling(currentAuthorSheetPinId);
-  }
-  currentAuthorSheetPinId = pin.id;
 
   content.innerHTML = createPopupContent(pin);
   attachCommentHandlers(pin.id);
@@ -1239,6 +1264,31 @@ function openAuthorSheet(pin) {
       centerMapUnderSheet([pin.lat, pin.lng], sheet);
     }, 60);
   }
+}
+
+function openAuthorSheet(pin) {
+  if (!pin || !pin.id) {
+    return;
+  }
+  const pinId = pin.id;
+  if (currentAuthorSheetPinId && currentAuthorSheetPinId !== pinId) {
+    stopCommentPolling(currentAuthorSheetPinId);
+  }
+  currentAuthorSheetPinId = pinId;
+
+  const handlePinData = (freshPin) => {
+    const resolvedPin = freshPin || pin;
+    if (freshPin) {
+      updateActiveMarkerEntry(freshPin);
+    }
+    renderAuthorSheetForPin(resolvedPin);
+  };
+
+  fetchPinDetails(pinId).then((freshPin) => {
+    handlePinData(freshPin);
+  }).catch(() => {
+    handlePinData(pin);
+  });
 }
 
 function centerMapUnderSheet(latlng, sheet) {

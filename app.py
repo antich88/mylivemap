@@ -593,6 +593,31 @@ def create_app() -> Flask:
             abort(500)
         return jsonify(pin.to_dict())
 
+    @app.route("/api/pins/<int:pin_id>", methods=["GET"])
+    def fetch_pin(pin_id: int) -> tuple[dict, int]:
+        pin = get_pin_by_id(pin_id)
+        if not pin:
+            abort(404)
+        payload = pin.to_dict()
+        user_id = pin.user_id
+        if user_id:
+            author = _build_user_state(user_id)
+            payload["author"] = {
+                "nickname": author.get("nickname") or user_id,
+                "avatar_url": author.get("avatar_url"),
+                "rating_total": author.get("rating_total"),
+                "age": author.get("age"),
+                "gender": author.get("gender"),
+            }
+        else:
+            payload["author"] = None
+        app.logger.info(
+            "pin fetch requested: pin_id=%s rating=%s",
+            pin_id,
+            payload.get("rating"),
+        )
+        return jsonify(payload)
+
     @app.route("/api/authors/<path:nickname>", methods=["GET"])
     def get_author(nickname: str) -> tuple[dict, int]:
         normalized = (nickname or "").strip()
@@ -658,8 +683,32 @@ def create_app() -> Flask:
             abort(404, description="Метка не найдена или устарела.")
         return jsonify({"comments": pin.comments})
 
-    @app.route("/api/pins/<int:pin_id>", methods=["DELETE"])
-    def remove_pin(pin_id: int) -> tuple[dict, int]:
+    @app.route("/api/pins/<int:pin_id>", methods=["GET", "DELETE"])
+    def manage_pin(pin_id: int) -> tuple[dict, int]:
+        if request.method == "GET":
+            pin = get_pin_by_id(pin_id)
+            if not pin:
+                abort(404)
+            payload = pin.to_dict()
+            user_id = pin.user_id
+            if user_id:
+                author = _build_user_state(user_id)
+                payload["author"] = {
+                    "nickname": author.get("nickname") or user_id,
+                    "avatar_url": author.get("avatar_url"),
+                    "rating_total": author.get("rating_total"),
+                    "age": author.get("age"),
+                    "gender": author.get("gender"),
+                }
+            else:
+                payload["author"] = None
+            app.logger.info(
+                "pin fetch requested: pin_id=%s rating=%s",
+                pin_id,
+                payload.get("rating"),
+            )
+            return jsonify(payload)
+
         user = current_user_payload()
         if not user:
             return jsonify({"message": "Нужно войти в аккаунт, чтобы удалять метки."}), 401
@@ -672,6 +721,7 @@ def create_app() -> Flask:
         deleted = delete_pin(pin_id, user_id)
         if not deleted:
             abort(500)
+        app.logger.info("pin delete requested: pin_id=%s user=%s", pin_id, user_id)
         return jsonify({"deleted": True})
 
     @app.route("/api/pins/<int:pin_id>/vote", methods=["POST"])
@@ -704,6 +754,13 @@ def create_app() -> Flask:
         }
         if result.get("profile_rating") is not None and result["pin_owner"] == user["nickname"]:
             response_payload["profile_rating"] = result["profile_rating"]
+        app.logger.info(
+            "vote recorded: pin_id=%s user=%s vote=%s rating=%s",
+            pin_id,
+            user["nickname"],
+            response_payload["vote_value"],
+            response_payload["pin_rating"],
+        )
         return jsonify(response_payload)
 
     @app.route("/api/subscriptions", methods=["GET", "POST", "DELETE"])
