@@ -1207,7 +1207,7 @@ function fetchPinDetails(pinId) {
   if (!pinId) {
     return Promise.resolve(null);
   }
-  return fetch(`/api/pins/${pinId}`, { credentials: 'same-origin' })
+  return fetch(`/api/pins/${pinId}`, { credentials: 'same-origin', cache: 'no-store' })
     .then(handleJsonResponse)
     .catch((error) => {
       console.error('Не удалось получить свежую метку', error);

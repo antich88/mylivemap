@@ -200,9 +200,9 @@ class Pin:
         payload["metadata"] = self.metadata or {}
         payload["category"] = self.category
         payload["user_id"] = self.user_id
-        payload["rating"] = int(self.rating or 0)
         payload["comments"] = self.comments
-        likes, dislikes = self.vote_counts
+        likes, dislikes = vote_counts_for_pin(self.id)
+        payload["rating"] = likes - dislikes
         payload["likes_count"] = likes
         payload["dislikes_count"] = dislikes
         return payload
