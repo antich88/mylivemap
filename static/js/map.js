@@ -21,6 +21,24 @@ const COMMENT_MAX_LENGTH = 500;
 const DEBUG_FILTER_PANEL = false;
 const ACTIVE_PINS_CLOCK_INTERVAL = 60_000;
 const SUBSCRIPTION_STORAGE_KEY = 'liveMapSubscribedAuthors';
+
+// Конфигурация уровней репутации (ключи строго числовые 1–5)
+const REPUTATION_LEVELS_CONFIG = {
+  1: { key: 'novice', label: 'Новичок', icon: '🌱', bgColor: '#9e9e9e', bgGradient: 'linear-gradient(90deg, #9e9e9e, #b0bec5)' },
+  2: { key: 'active', label: 'Активный', icon: '⚡', bgColor: '#4caf50', bgGradient: 'linear-gradient(90deg, #43a047, #66bb6a)' },
+  3: { key: 'verified', label: 'Проверенный', icon: '🛡', bgColor: '#2196f3', bgGradient: 'linear-gradient(90deg, #1e88e5, #42a5f5)' },
+  4: { key: 'expert', label: 'Эксперт', icon: '👑', bgColor: '#9c27b0', bgGradient: 'linear-gradient(90deg, #8e24aa, #ba68c8)' },
+  5: { key: 'legend', label: 'Легенда', icon: '💎', bgColor: '#ffd700', bgGradient: 'linear-gradient(90deg, #ffd700, #ffa000)' },
+};
+let levelUpAckedOnce = false;
+
+function getReputationLevelConfig(levelRaw) {
+  const levelNumber = Number(levelRaw);
+  if (Number.isNaN(levelNumber)) {
+    return null;
+  }
+  return REPUTATION_LEVELS_CONFIG[levelNumber] || REPUTATION_LEVELS_CONFIG[1] || null;
+}
 let subscriptionsFilterActive = false;
 const subscribedAuthorNicknames = new Set();
 let updateSubscribeButtonState = () => {};
@@ -101,6 +119,108 @@ let createSheetState = {
   selectedSubcategorySlug: null,
 };
 let currentAuthorSheetPinId = null;
+const pinTimerHandles = new Map();
+
+function formatRemainingTime(secondsLeft) {
+  const NORMAL_COLOR = '#9CA3AF';
+  const WARNING_COLOR = '#F59E0B';
+  const URGENT_COLOR = '#EF4444';
+  if (secondsLeft === null || secondsLeft === undefined || Number.isNaN(secondsLeft)) {
+    return { text: 'Бессрочно', color: NORMAL_COLOR, urgent: false };
+  }
+  if (secondsLeft <= 0) {
+    return { text: 'Истекло', color: URGENT_COLOR, urgent: false };
+  }
+  const minutesLeft = Math.max(0, Math.floor(secondsLeft / 60));
+  if (minutesLeft >= 60) {
+    const hours = Math.floor(minutesLeft / 60);
+    const mins = minutesLeft % 60;
+    const parts = [
+      `${hours}ч`,
+    ];
+    if (mins > 0) {
+      parts.push(`${mins}м`);
+    }
+    const text = `Осталось ${parts.join(' ')}`;
+    return { text, color: NORMAL_COLOR, urgent: false };
+  }
+  if (minutesLeft >= 5) {
+    return { text: `Осталось ${minutesLeft}м`, color: WARNING_COLOR, urgent: false };
+  }
+  const displayMinutes = minutesLeft > 0 ? minutesLeft : 1;
+  return { text: `Осталось ${displayMinutes}м!`, color: URGENT_COLOR, urgent: true };
+}
+
+function updateTimerElement(el, info) {
+  if (!el) {
+    return;
+  }
+  el.textContent = info.text;
+  el.style.color = info.color;
+  el.classList.toggle('timer-urgent', info.urgent);
+}
+
+function clearPinTimer(pinId) {
+  if (!pinId) {
+    return;
+  }
+  const handle = pinTimerHandles.get(pinId);
+  if (handle) {
+    clearTimeout(handle);
+    pinTimerHandles.delete(pinId);
+  }
+}
+
+function startPinTimer(pinId, initialSeconds, element) {
+  clearPinTimer(pinId);
+  if (!element) {
+    return;
+  }
+  const seconds = typeof initialSeconds === 'number' && !Number.isNaN(initialSeconds)
+    ? Math.max(0, initialSeconds)
+    : null;
+  const info = formatRemainingTime(seconds);
+  updateTimerElement(element, info);
+  if (seconds === null || seconds <= 0) {
+    return;
+  }
+  let remainingSeconds = seconds;
+  let lastUpdate = Date.now();
+
+  const scheduleNextTick = () => {
+    const intervalMs = remainingSeconds <= 5 * 60 ? 10000 : 30000;
+    const timerId = setTimeout(() => {
+      const now = Date.now();
+      const elapsedSeconds = Math.max(1, Math.floor((now - lastUpdate) / 1000));
+      lastUpdate = now;
+      remainingSeconds = Math.max(0, remainingSeconds - elapsedSeconds);
+      const nextInfo = formatRemainingTime(remainingSeconds);
+      updateTimerElement(element, nextInfo);
+      if (remainingSeconds <= 0) {
+        clearPinTimer(pinId);
+        return;
+      }
+      scheduleNextTick();
+    }, intervalMs);
+    pinTimerHandles.set(pinId, timerId);
+  };
+
+  scheduleNextTick();
+}
+
+function initializePinTimer(pin) {
+  if (!pin || !pin.id) {
+    return;
+  }
+  const timerEl = document.querySelector(`.pin-detail-card__ttl[data-pin-timer="${pin.id}"]`);
+  if (!timerEl) {
+    return;
+  }
+  const ttlSeconds = typeof pin.ttl_seconds === 'number' && !Number.isNaN(pin.ttl_seconds)
+    ? Math.max(0, pin.ttl_seconds)
+    : null;
+  startPinTimer(pin.id, ttlSeconds, timerEl);
+}
 let createPreviewMarker = null;
 let createSheetElements = null;
 let createSheetInitialized = false;
@@ -942,6 +1062,9 @@ function renderPinAuthorIntro(pin, isSelf = false) {
     ? `<img src="${avatarUrl}" alt="Аватар ${safeNickname}" loading="lazy" />`
     : `<span class="pin-popup__author-avatar-placeholder">${safeNickname.charAt(0).toUpperCase()}</span>`;
 
+  const indicators = renderAuthorIndicators(author);
+  const badge = renderReputationBadge(author);
+
   return `
     <div class="pin-popup__author">
       <div class="pin-popup__author-avatar" aria-hidden="true">
@@ -957,13 +1080,56 @@ function renderPinAuthorIntro(pin, isSelf = false) {
           data-author-link
           data-author-id="${safeAuthorId}"
         >
-          <span class="pin-popup__author-link">
-          <span class="pin-popup__author-nickname">${safeNickname}</span>
+          <span class="pin-popup__author-link author-inline">
+            <span class="pin-popup__author-nickname author-inline__name">${safeNickname}</span>
+            <span class="author-inline__name-icons">${indicators}</span>
           </span>
         </button>
+        ${badge}
       </div>
     </div>
   `;
+}
+
+function renderReputationBadge(author = {}) {
+  const levelRaw = author.reputation_level;
+  if (levelRaw === null || levelRaw === undefined) {
+    return '';
+  }
+  const config = getReputationLevelConfig(levelRaw);
+  if (!config) {
+    return '';
+  }
+  const background = config.bgGradient || config.bgColor || '#4caf50';
+  const authorId = escapeHtml(author.nickname || author.user_id || author.authorNick || '');
+  const isSelf = authorId && currentAuthUser?.nickname === authorId;
+  return `
+    <button
+      type="button"
+      class="pin-popup__author-badge pin-popup__author-badge--${config.key}"
+      style="background:${background}"
+      data-author-panel-trigger
+      data-author-id="${authorId}"
+      data-author-self="${isSelf ? 'true' : 'false'}"
+    >
+      <span class="pin-popup__author-badge-icon" aria-hidden="true">${config.icon}</span>
+      <span class="pin-popup__author-badge-text">${escapeHtml(config.label)}</span>
+    </button>
+  `;
+}
+
+function renderAuthorIndicators(author = {}) {
+  const parts = [];
+  if (author.is_verified) {
+    parts.push(`<span class="author-inline__verified" aria-label="Проверенный автор" title="Проверенный автор">✓</span>`);
+  }
+  if (author.is_active_recently) {
+    parts.push(`<span class="author-inline__active-recently" aria-label="Активен недавно" title="Активен недавно">🔥</span>`);
+  }
+  if (!parts.length) {
+    return '';
+  }
+  return parts.join('');
 }
 
 function buildPinAuthorInfo(pin) {
@@ -971,9 +1137,13 @@ function buildPinAuthorInfo(pin) {
   const nickname = author.nickname || pin.user_id || pin.nickname || 'Автор';
   const avatar_url = author.avatar_url || pin.avatar_url || '';
   const rating_total = typeof author.rating_total === 'number' ? author.rating_total : null;
+  const reputation_level = author.reputation_level || author.reputation_level === 0 ? author.reputation_level : null;
+  const reputation_points = typeof author.reputation_points === 'number' ? author.reputation_points : null;
+  const is_verified = Boolean(author.is_verified);
+  const is_active_recently = Boolean(author.is_active_recently);
   const age = typeof author.age === 'number' ? author.age : null;
   const gender = typeof author.gender === 'string' ? author.gender : null;
-  return { nickname, avatar_url, rating_total, age, gender };
+  return { nickname, avatar_url, rating_total, reputation_level, reputation_points, is_verified, is_active_recently, age, gender };
 }
 
 function getAuthorPanelElements() {
@@ -1249,6 +1419,7 @@ function renderAuthorSheetForPin(pin) {
   initializeCommentsView(pin.id, pin.comments || []);
   startCommentPolling(pin.id);
   attachAuthorPopupHandlers({ getElement: () => content }, pin);
+  initializePinTimer(pin);
 
   sheet.removeAttribute('hidden');
   if (backdrop) backdrop.removeAttribute('hidden');
@@ -1273,6 +1444,7 @@ function openAuthorSheet(pin) {
   const pinId = pin.id;
   if (currentAuthorSheetPinId && currentAuthorSheetPinId !== pinId) {
     stopCommentPolling(currentAuthorSheetPinId);
+    clearPinTimer(currentAuthorSheetPinId);
   }
   currentAuthorSheetPinId = pinId;
 
@@ -1419,7 +1591,7 @@ function attachAuthorPopupHandlers(popup, pin) {
     });
   });
 
-  const subscribeBtn = popupEl.querySelector('.author-panel__subscribe-btn');
+    const subscribeBtn = popupEl.querySelector('.author-panel__subscribe-btn');
   if (subscribeBtn) {
     subscribeBtn.dataset.authorSubscribe = 'true';
     subscribeBtn.addEventListener('click', (event) => {
@@ -1455,41 +1627,24 @@ function createPopupContent(pin) {
   const commentCount = pinnedComments.length;
   const author = buildPinAuthorInfo(pin);
   const safeNickname = escapeHtml(author.nickname || 'Автор');
+  const safeAuthorId = escapeHtml(author.nickname || author.user_id || pin.user_id || '');
   const avatarInitial = (safeNickname.charAt(0) || 'A').toUpperCase();
   const authorAvatarMarkup = author.avatar_url
     ? `<img src="${escapeHtml(author.avatar_url)}" alt="Аватар ${safeNickname}" loading="lazy" class="pin-detail-card__avatar-img" />`
     : `<span class="pin-detail-card__avatar-initial">${avatarInitial}</span>`;
-  const ratingSource = Number.isFinite(pin.author?.rating_total) ? pin.author.rating_total : Number.isFinite(pin.rating) ? pin.rating : 0;
-  const boundedRating = Math.max(0, Math.min(ratingSource, 5));
-  const ratingVotesCount = typeof pin.author?.rating_count === 'number'
-    ? pin.author.rating_count
-    : (typeof pin.author?.rating_votes === 'number'
-      ? pin.author.rating_votes
-      : (Number.isFinite(pin.rating_votes) ? pin.rating_votes : null));
-  const hasRating = boundedRating > 0 || (typeof ratingVotesCount === 'number' && ratingVotesCount > 0);
-  const ratingDisplayValue = hasRating ? boundedRating.toFixed(1).replace(/\.0$/, '') : '—';
-  const ratingPercent = hasRating ? Math.max(0, Math.min((boundedRating / 5) * 100, 100)) : 0;
-  const ratingMetaText = (typeof ratingVotesCount === 'number' && ratingVotesCount > 0)
-    ? `${ratingVotesCount} оценок`
-    : 'Оценок пока нет';
   const commentsList = renderCommentsList(pinnedComments, currentNickname, pin.id);
   const commentForm = renderCommentForm(currentNickname, pin.id);
-  const ttlMinutes = typeof pin.ttl_seconds === 'number' && !Number.isNaN(pin.ttl_seconds)
-    ? Math.max(0, Math.ceil(pin.ttl_seconds / 60))
+  const ttlSeconds = typeof pin.ttl_seconds === 'number' && !Number.isNaN(pin.ttl_seconds)
+    ? Math.max(0, pin.ttl_seconds)
     : null;
-  const ttlLabel = ttlMinutes === null ? 'Бессрочно' : `${ttlMinutes} мин.`;
+  const initialTimerInfo = formatRemainingTime(ttlSeconds);
   const canDeletePin = Boolean(currentNickname && currentNickname === pin.user_id);
 
   const voteControlsMarkup = renderVoteControls(pin);
-  const ratingMarkup = `
-    <div class="pin-detail-card__rating">
-      <div class="pin-detail-card__rating-value pin-popup__rating-value" data-pin-rating-pin="${pin.id}">${ratingDisplayValue}</div>
-      <div class="pin-detail-card__rating-scale" aria-hidden="true">
-        <span class="pin-detail-card__rating-fill" style="width: ${ratingPercent.toFixed(2)}%;"></span>
-      </div>
-      <div class="pin-detail-card__rating-controls">
-        ${voteControlsMarkup}
-      </div>
+  const voteRowMarkup = `
+    <div class="pin-detail-card__vote-row">
+      <span class="pin-detail-card__vote-label">Оценить метку:</span>
+      ${voteControlsMarkup}
     </div>
   `;
 
@@ -1509,18 +1664,32 @@ function createPopupContent(pin) {
             <div class="pin-detail-card__avatar" aria-hidden="true">
               ${authorAvatarMarkup}
             </div>
-            <div class="pin-detail-card__author-meta">
-              <strong class="pin-detail-card__author-name">${safeNickname}</strong>
-            </div>
-          </div>
-          <div class="pin-detail-card__ttl">
-            <span class="pin-detail-card__ttl-icon" aria-hidden="true">⏳</span>
-            <span class="pin-detail-card__ttl-value">${ttlLabel}</span>
+          <div class="pin-detail-card__author-meta">
+            <button
+              type="button"
+              class="author-inline pin-detail-card__author-trigger"
+              data-author-panel-trigger
+              data-author-id="${safeAuthorId}"
+              data-author-self="${safeAuthorId && currentAuthUser?.nickname === safeAuthorId ? 'true' : 'false'}"
+            >
+              <strong class="pin-detail-card__author-name author-inline__name" data-author-name>${safeNickname}</strong>
+              <span class="author-inline__name-icons">
+                ${renderAuthorIndicators(author)}
+              </span>
+            </button>
+            ${renderReputationBadge(author)}
           </div>
         </div>
-        ${ratingMarkup}
+          <div class="pin-detail-card__ttl" data-pin-timer="${pin.id}">
+            <span class="marker-timer ${initialTimerInfo.urgent ? 'timer-urgent' : ''}" style="color: ${initialTimerInfo.color};">
+              ${initialTimerInfo.text}
+            </span>
+          </div>
+        </div>
+        ${voteRowMarkup}
       </header>
 
+      <div class="pin-detail-card__title">${escapeHtml(pin.nickname || pin.title || 'Метка')}</div>
       <div class="pin-detail-card__description">
         <p>${escapeHtml(pin.description || 'Описание отсутствует.')}</p>
       </div>
@@ -2265,6 +2434,59 @@ function showUserToast(message) {
   }, 3800);
 }
 
+function findBadgeForNickname(nickname) {
+  const normalized = (nickname || '').trim();
+  if (!normalized) {
+    return null;
+  }
+  const badges = document.querySelectorAll('.pin-popup__author-badge');
+  for (const badge of badges) {
+    const authorId = (badge.dataset.authorId || '').trim();
+    if (authorId && authorId === normalized) {
+      return badge;
+    }
+  }
+  return null;
+}
+
+function triggerLevelUpAnimation(badgeEl) {
+  if (!badgeEl) {
+    return;
+  }
+  badgeEl.classList.add('pin-popup__author-badge--leveled-up');
+  setTimeout(() => {
+    badgeEl.classList.remove('pin-popup__author-badge--leveled-up');
+  }, 2000);
+}
+
+function celebrateLevelUpIfNeeded(user) {
+  if (!user || levelUpAckedOnce || !user.level_up_pending) {
+    return;
+  }
+  levelUpAckedOnce = true;
+  const config = getReputationLevelConfig(user.reputation_level);
+  const label = config?.label || 'Новый уровень';
+  const icon = config?.icon ? `${config.icon} ` : '';
+  showUserToast(`${icon}Поздравляем! Вы достигли уровня ${label}`);
+  const badge = findBadgeForNickname(user.nickname || user.user_id || '');
+  if (badge) {
+    triggerLevelUpAnimation(badge);
+  }
+  fetch('/api/user/level-up-acknowledged', {
+    method: 'POST',
+    credentials: 'same-origin',
+  })
+    .then(handleJsonResponse)
+    .then(() => {
+      if (currentAuthUser) {
+        currentAuthUser.level_up_pending = false;
+      }
+    })
+    .catch((error) => {
+      console.warn('level-up-acknowledged endpoint missing or failed:', error?.message || error);
+    });
+}
+
 function getAuthElements() {
   return {
     statusEl: document.getElementById('auth-status'),
@@ -2546,6 +2768,7 @@ function renderAuthState(message = '') {
       expandFilterPanel();
       toggleUserPanelExpandedState(true);
     }
+    celebrateLevelUpIfNeeded(currentAuthUser);
   } else {
     stopActivePinsClock();
   }

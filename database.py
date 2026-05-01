@@ -154,6 +154,9 @@ else:
         Column("age", Integer),
         Column("gender", String(16)),
         Column("avatar_path", String(512)),
+        Column("reputation_points", Integer, nullable=False, server_default=text("0")),
+        Column("level_up_pending", Integer, nullable=False, server_default=text("0")),
+        Column("is_verified", Integer, nullable=False, server_default=text("0")),
         Column("created_at", DateTime(timezone=True), nullable=False),
         Column("updated_at", DateTime(timezone=True), nullable=False),
     )
@@ -221,8 +224,6 @@ else:
 
 
     def _ensure_remote_schema_updates() -> None:
-        if not DATABASE_URL.startswith("postgres"):
-            return
         inspector = inspect(ENGINE)
         table_names = set(inspector.get_table_names())
         for table in metadata.sorted_tables:
@@ -230,12 +231,28 @@ else:
                 continue
             metadata.create_all(ENGINE, tables=[table])
             table_names.add(table.name)
-        if "pins" not in table_names:
-            return
-        columns = {col["name"] for col in inspector.get_columns("pins")}
-        if "image_url" not in columns:
-            with ENGINE.begin() as conn:
-                conn.execute(text("ALTER TABLE pins ADD COLUMN image_url VARCHAR(512)"))
+
+        # pins: ensure image_url
+        if "pins" in table_names:
+            pin_columns = {col["name"] for col in inspector.get_columns("pins")}
+            if "image_url" not in pin_columns:
+                with ENGINE.begin() as conn:
+                    conn.execute(text("ALTER TABLE pins ADD COLUMN image_url VARCHAR(512)"))
+
+        # user_profiles: new reputation/level/verification fields
+        if "user_profiles" in table_names:
+            profile_columns = {col["name"] for col in inspector.get_columns("user_profiles")}
+            alter_statements = []
+            if "reputation_points" not in profile_columns:
+                alter_statements.append("ALTER TABLE user_profiles ADD COLUMN reputation_points INTEGER DEFAULT 0 NOT NULL")
+            if "level_up_pending" not in profile_columns:
+                alter_statements.append("ALTER TABLE user_profiles ADD COLUMN level_up_pending INTEGER DEFAULT 0 NOT NULL")
+            if "is_verified" not in profile_columns:
+                alter_statements.append("ALTER TABLE user_profiles ADD COLUMN is_verified INTEGER DEFAULT 0 NOT NULL")
+            if alter_statements:
+                with ENGINE.begin() as conn:
+                    for stmt in alter_statements:
+                        conn.execute(text(stmt))
 
 
     _ensure_remote_schema_updates()

@@ -31,6 +31,9 @@ from auth_store import (
     update_user_password,
     update_user_profile_fields,
     verify_user_credentials,
+    adjust_user_reputation,
+    set_level_up_pending,
+    get_reputation_state,
 )
 from config import (
     ALLOWED_AVATAR_EXTENSIONS,
@@ -60,6 +63,9 @@ from models import (
     get_pin_by_id,
     get_pin_owner,
     get_user_rating_total,
+    count_user_markers,
+    count_user_likes_received,
+    is_author_active_recently,
     record_vote,
     reassign_user_id,
     user_votes_for_pins,
@@ -156,6 +162,9 @@ def create_app() -> Flask:
             "gender": gender_value,
             "avatar_url": avatar_url,
             "avatar_path": avatar_filename,
+            "reputation_points": profile.get("reputation_points", 0),
+            "level_up_pending": bool(profile.get("level_up_pending") or False),
+            "is_verified": bool(profile.get("is_verified") or False),
             "created_at": _serialize_datetime(profile.get("created_at")),
             "updated_at": _serialize_datetime(profile.get("updated_at")),
         }
@@ -163,6 +172,9 @@ def create_app() -> Flask:
     def _build_user_state(nickname: str) -> dict:
         base = {"nickname": nickname, "age": None, "gender": None, "avatar_url": None}
         base["rating_total"] = get_user_rating_total(nickname)
+        # reputation state
+        reputation = get_reputation_state(nickname)
+        base.update(reputation)
         try:
             profile = get_or_create_user_profile(nickname)
         except Exception as exc:  # pragma: no cover
@@ -396,7 +408,8 @@ def create_app() -> Flask:
         user = current_user_payload()
         payload = {"authenticated": bool(user)}
         if user:
-            payload["user"] = user
+            nickname = user.get("nickname")
+            payload["user"] = _build_user_state(nickname) if nickname else None
             payload["subscriptions"] = user.get("subscriptions") or []
         else:
             payload["user"] = None
@@ -549,6 +562,11 @@ def create_app() -> Flask:
                         "nickname": author.get("nickname") or user_id,
                         "avatar_url": author.get("avatar_url"),
                         "rating_total": author.get("rating_total"),
+                        "reputation_points": author.get("reputation_points"),
+                        "reputation_level": author.get("reputation_level"),
+                        "level_up_pending": author.get("level_up_pending"),
+                        "is_verified": author.get("is_verified"),
+                        "is_active_recently": is_author_active_recently(user_id),
                         "age": author.get("age"),
                         "gender": author.get("gender"),
                     }
@@ -578,6 +596,7 @@ def create_app() -> Flask:
             response = jsonify({"message": USER_LIMIT_MESSAGE})
             response.status_code = 429
             return response
+        adjust_user_reputation(user_id, +1)
         pin = create_pin(
             category=category,
             category_slug=payload.get("category_slug") or category,
@@ -606,6 +625,11 @@ def create_app() -> Flask:
                 "nickname": author.get("nickname") or user_id,
                 "avatar_url": author.get("avatar_url"),
                 "rating_total": author.get("rating_total"),
+                "reputation_points": author.get("reputation_points"),
+                "reputation_level": author.get("reputation_level"),
+                "level_up_pending": author.get("level_up_pending"),
+                "is_verified": author.get("is_verified"),
+                "is_active_recently": is_author_active_recently(user_id),
                 "age": author.get("age"),
                 "gender": author.get("gender"),
             }
@@ -750,6 +774,9 @@ def create_app() -> Flask:
             "likes_count": result.get("likes_count"),
             "dislikes_count": result.get("dislikes_count"),
         }
+        # apply reputation delta to pin owner
+        if result.get("reputation_delta") and result["pin_owner"]:
+            adjust_user_reputation(result["pin_owner"], result["reputation_delta"], trigger_level_up=True)
         if result.get("profile_rating") is not None and result["pin_owner"] == user["nickname"]:
             response_payload["profile_rating"] = result["profile_rating"]
         app.logger.info(
@@ -801,6 +828,14 @@ def create_app() -> Flask:
             return {"message": "Нужно войти в аккаунт."}, 401
         remove_user_subscription(user["nickname"], author_nickname)
         return {"message": "Подписка удалена."}, 200
+
+    @app.route("/api/user/level-up-acknowledged", methods=["POST"])
+    def level_up_ack() -> tuple[dict, int]:
+        user = current_user_payload()
+        if not user:
+            return {"message": "Нужно войти в аккаунт."}, 401
+        set_level_up_pending(user["nickname"], False)
+        return {"ok": True}, 200
 
     @app.route("/api/user/votes", methods=["GET"])
     def user_votes_route() -> tuple[dict, int]:

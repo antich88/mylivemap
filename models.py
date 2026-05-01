@@ -689,6 +689,107 @@ def get_user_rating_total(user_id: str) -> int:
     return int(result or 0)
 
 
+def count_user_markers(user_id: str) -> int:
+    if not user_id:
+        return 0
+    now_iso = datetime.now(timezone.utc)
+
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        return sum(
+            1
+            for record in snapshot.get("pins", [])
+            if str(record.get("user_id") or "") == user_id and _pin_is_active(record, now_iso)
+        )
+
+    from sqlalchemy import func, select
+
+    with session_scope() as session:
+        stmt = select(func.count()).where(
+            pins_table.c.user_id == user_id,
+            (pins_table.c.expires_at.is_(None) | (pins_table.c.expires_at > now_iso)),
+        )
+        result = session.execute(stmt).scalar()
+    return int(result or 0)
+
+
+def count_user_likes_received(user_id: str) -> int:
+    if not user_id:
+        return 0
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        total_likes = 0
+        for record in snapshot.get("pins", []):
+            if str(record.get("user_id") or "") != user_id:
+                continue
+            metadata = _ensure_votes_container(record.get("metadata") or {})
+            likes, _ = _count_vote_entries(metadata.get("votes", []))
+            total_likes += likes
+        return total_likes
+
+    from sqlalchemy import func, select
+
+    with session_scope() as session:
+        stmt = select(func.count()).where(
+            votes_table.c.pin_id == pins_table.c.id,
+            pins_table.c.user_id == user_id,
+            votes_table.c.vote_value == 1,
+        )
+        result = session.execute(stmt).scalar()
+    return int(result or 0)
+
+
+def is_author_active_recently(user_id: str, days: int = 7) -> bool:
+    if not user_id:
+        return False
+    threshold = datetime.now(timezone.utc) - timedelta(days=days)
+
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        for record in snapshot.get("pins", []):
+            if str(record.get("user_id") or "") != user_id:
+                continue
+            created_at = _coerce_dt(record.get("created_at"))
+            if created_at and created_at >= threshold:
+                return True
+        return False
+
+    from sqlalchemy import select
+
+    with session_scope() as session:
+        stmt = (
+            select(pins_table.c.id)
+            .where(
+                pins_table.c.user_id == user_id,
+                pins_table.c.created_at >= threshold,
+            )
+            .limit(1)
+        )
+        row = session.execute(stmt).first()
+    return bool(row)
+
+
+# --- Reputation helpers ---
+
+REPUTATION_LEVELS = [
+    {"min": 0, "max": 10, "level": 1, "name": "Новичок"},
+    {"min": 11, "max": 50, "level": 2, "name": "Активный"},
+    {"min": 51, "max": 200, "level": 3, "name": "Проверенный"},
+    {"min": 201, "max": 500, "level": 4, "name": "Эксперт"},
+    {"min": 501, "max": None, "level": 5, "name": "Легенда"},
+]
+
+
+def reputation_level(points: int) -> int:
+    safe_points = max(0, int(points or 0))
+    for bucket in REPUTATION_LEVELS:
+        bucket_max = bucket["max"]
+        if bucket_max is None or safe_points <= bucket_max:
+            if safe_points >= bucket["min"]:
+                return bucket["level"]
+    return REPUTATION_LEVELS[-1]["level"]
+
+
 def adjust_rating(pin_id: int, delta: int = 1) -> Optional[int]:
     if LOCAL_MODE:
         snapshot = _LOCAL_STORE.snapshot()
@@ -863,6 +964,7 @@ def record_vote(pin_id: int, user_id: str, vote_value: int) -> Optional[dict]:
             "pin_owner": owner,
             "likes_count": int(likes_count),
             "dislikes_count": int(dislikes_count),
+            "reputation_delta": delta,
         }
 
 

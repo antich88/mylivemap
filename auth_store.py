@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, List
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -107,6 +107,9 @@ def _default_profile_payload(nickname: str) -> Dict[str, Any]:
         "age": None,
         "gender": None,
         "avatar_path": None,
+        "reputation_points": 0,
+        "level_up_pending": 0,
+        "is_verified": 0,
         "created_at": timestamp,
         "updated_at": timestamp,
         "subscriptions": [],
@@ -226,7 +229,12 @@ def _local_profile_record(nickname: str) -> Optional[Dict[str, Any]]:
     snapshot = _LOCAL_PROFILES_STORE.snapshot()
     for entry in snapshot.get("profiles", []):
         if str(entry.get("nickname") or "") == nickname:
-            return entry
+            normalized = dict(entry)
+            normalized.setdefault("reputation_points", 0)
+            normalized.setdefault("level_up_pending", 0)
+            normalized.setdefault("is_verified", 0)
+            normalized.setdefault("subscriptions", [])
+            return normalized
     return None
 
 
@@ -244,7 +252,17 @@ def get_or_create_user_profile(nickname: str) -> Dict[str, Any]:
     from sqlalchemy import insert, select
 
     with session_scope() as session:
-        stmt = select(profiles_table).where(profiles_table.c.nickname == normalized)
+        stmt = select(
+            profiles_table.c.nickname,
+            profiles_table.c.age,
+            profiles_table.c.gender,
+            profiles_table.c.avatar_path,
+            profiles_table.c.reputation_points,
+            profiles_table.c.level_up_pending,
+            profiles_table.c.is_verified,
+            profiles_table.c.created_at,
+            profiles_table.c.updated_at,
+        ).where(profiles_table.c.nickname == normalized)
         row = session.execute(stmt).mappings().first()
         if row:
             return dict(row)
@@ -254,6 +272,9 @@ def get_or_create_user_profile(nickname: str) -> Dict[str, Any]:
             "age": None,
             "gender": None,
             "avatar_path": None,
+            "reputation_points": 0,
+            "level_up_pending": 0,
+            "is_verified": 0,
             "created_at": now,
             "updated_at": now,
         }
@@ -265,6 +286,9 @@ def get_or_create_user_profile(nickname: str) -> Dict[str, Any]:
                 profiles_table.c.age,
                 profiles_table.c.gender,
                 profiles_table.c.avatar_path,
+                profiles_table.c.reputation_points,
+                profiles_table.c.level_up_pending,
+                profiles_table.c.is_verified,
                 profiles_table.c.created_at,
                 profiles_table.c.updated_at,
             )
@@ -308,7 +332,17 @@ def update_user_profile_fields(
             .values(**updates_sql)
         )
         session.execute(update_stmt)
-        stmt = select(profiles_table).where(profiles_table.c.nickname == normalized)
+        stmt = select(
+            profiles_table.c.nickname,
+            profiles_table.c.age,
+            profiles_table.c.gender,
+            profiles_table.c.avatar_path,
+            profiles_table.c.reputation_points,
+            profiles_table.c.level_up_pending,
+            profiles_table.c.is_verified,
+            profiles_table.c.created_at,
+            profiles_table.c.updated_at,
+        ).where(profiles_table.c.nickname == normalized)
         row = session.execute(stmt).mappings().first()
         if not row:
             raise ValueError("Профиль не найден.")
@@ -339,6 +373,9 @@ def update_user_avatar_path(nickname: str, avatar_path: Optional[str]) -> Dict[s
                 profiles_table.c.age,
                 profiles_table.c.gender,
                 profiles_table.c.avatar_path,
+                profiles_table.c.reputation_points,
+                profiles_table.c.level_up_pending,
+                profiles_table.c.is_verified,
                 profiles_table.c.created_at,
                 profiles_table.c.updated_at,
             )
@@ -440,6 +477,99 @@ def get_user_by_nickname(nickname: str) -> Optional[AuthUser]:
         password_hash=str(row["password_hash"]),
         created_at=row["created_at"],
     )
+
+
+# --- Reputation helpers ---
+
+def _clamp_points(value: int) -> int:
+    return max(0, int(value or 0))
+
+
+def calculate_reputation_level(points: int) -> int:
+    safe_points = _clamp_points(points)
+    if safe_points <= 10:
+        return 1
+    if safe_points <= 50:
+        return 2
+    if safe_points <= 200:
+        return 3
+    if safe_points <= 500:
+        return 4
+    return 5
+
+
+def reputation_level(points: int) -> int:
+    return calculate_reputation_level(points)
+
+
+def get_reputation_state(nickname: str) -> Dict[str, Any]:
+    profile = get_or_create_user_profile(nickname)
+    points = _clamp_points(profile.get("reputation_points", 0))
+    pending = bool(profile.get("level_up_pending") or False)
+    is_verified = bool(profile.get("is_verified") or False)
+    return {
+        "reputation_points": points,
+        "reputation_level": calculate_reputation_level(points),
+        "level_up_pending": pending,
+        "is_verified": is_verified,
+    }
+
+
+def _save_profile_reputation(profile: Dict[str, Any]) -> Dict[str, Any]:
+    if LOCAL_MODE:
+        profile = dict(profile)
+        return _persist_local_profile(profile)
+    from sqlalchemy import update, select
+    normalized = _normalize_nickname(profile.get("nickname", ""))
+    if not normalized:
+        return profile
+    with session_scope() as session:
+        update_stmt = (
+            update(profiles_table)
+            .where(profiles_table.c.nickname == normalized)
+            .values(
+                reputation_points=_clamp_points(profile.get("reputation_points", 0)),
+                level_up_pending=1 if profile.get("level_up_pending") else 0,
+                is_verified=1 if profile.get("is_verified") else 0,
+                updated_at=_now_utc(),
+            )
+        )
+        session.execute(update_stmt)
+        stmt = select(
+            profiles_table.c.nickname,
+            profiles_table.c.age,
+            profiles_table.c.gender,
+            profiles_table.c.avatar_path,
+            profiles_table.c.reputation_points,
+            profiles_table.c.level_up_pending,
+            profiles_table.c.is_verified,
+            profiles_table.c.created_at,
+            profiles_table.c.updated_at,
+        ).where(profiles_table.c.nickname == normalized)
+        row = session.execute(stmt).mappings().first()
+    return dict(row) if row else profile
+
+
+def set_level_up_pending(nickname: str, pending: bool) -> Dict[str, Any]:
+    profile = get_or_create_user_profile(nickname)
+    profile = dict(profile)
+    profile["level_up_pending"] = bool(pending)
+    return _save_profile_reputation(profile)
+
+
+def adjust_user_reputation(nickname: str, delta: int, *, trigger_level_up: bool = True) -> Dict[str, Any]:
+    profile = get_or_create_user_profile(nickname)
+    profile = dict(profile)
+    previous_points = _clamp_points(profile.get("reputation_points", 0))
+    previous_level = reputation_level(previous_points)
+    next_points = _clamp_points(previous_points + int(delta or 0))
+    profile["reputation_points"] = next_points
+    next_level = reputation_level(next_points)
+    if trigger_level_up and next_level > previous_level and delta > 0:
+        profile["level_up_pending"] = True
+    else:
+        profile["level_up_pending"] = bool(profile.get("level_up_pending") or False)
+    return _save_profile_reputation(profile)
 
 
 def create_user(nickname: str, password: str) -> Optional[AuthUser]:

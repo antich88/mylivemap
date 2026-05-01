@@ -1890,10 +1890,52 @@ html {
   gap: 12px;
 }
 
-.pin-detail-card__ttl {
+button.author-inline.pin-detail-card__author-trigger {
+  cursor: pointer;
+}
+
+button.author-inline.pin-detail-card__author-trigger .pin-detail-card__author-name,
+button.author-inline.pin-detail-card__author-trigger .author-inline__name {
+  color: #fff;
+  background: transparent;
+}
+
+.pin-popup__author-badge {
+  border: none;
+  color: #fff;
+}
+
+.pin-popup__author-badge,
+button.author-inline.pin-detail-card__author-trigger {
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.2;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #fff;
+}
+
+.pin-popup__author-badge {
+  border: none;
+}
+
+.pin-popup__author-badge.pin-popup__author-badge--novice,
+.pin-popup__author-badge.pin-popup__author-badge--active,
+.pin-popup__author-badge.pin-popup__author-badge--verified,
+.pin-popup__author-badge.pin-popup__author-badge--expert,
+.pin-popup__author-badge.pin-popup__author-badge--legend {
+  /* уровень различается иконкой и текстом */
+}
+
+.pin-detail-card__ttl {
   font-size: 0.9rem;
   color: rgba(255, 255, 255, 0.6);
 }
@@ -1902,37 +1944,34 @@ html {
   font-size: 0.85rem;
 }
 
-.pin-detail-card__rating {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  min-width: 160px;
+.marker-timer {
+  font-size: clamp(11px, 0.75rem, 12px);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color 0.3s ease;
 }
 
-.pin-popup__vote-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 8px;
+.timer-urgent {
+  animation: pulse-urgent 1.5s ease-in-out infinite;
 }
 
-.pin-detail-card__rating-controls {
-  width: 100%;
-  display: flex;
-  justify-content: center;
-  margin-top: 6px;
+@keyframes pulse-urgent {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
-.pin-popup__vote-buttons {
+.pin-detail-card__vote-row {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 16px;
-  padding: 2px;
+  width: 100%;
+}
+
+.pin-detail-card__vote-label {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.2;
 }
 
 .pin-vote-button {
@@ -1977,28 +2016,12 @@ html {
   background: rgba(198, 40, 40, 0.15);
 }
 
-.pin-detail-card__rating-value {
-  font-weight: 700;
-  font-size: 1.1rem;
-  color: #ffffff;
-}
-
-.pin-detail-card__rating-scale {
-  position: relative;
-  flex: 1;
-  height: 6px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.15);
-  overflow: hidden;
-}
-
-.pin-detail-card__rating-fill {
-  position: absolute;
-  inset: 0;
-  display: block;
-  background: linear-gradient(135deg, #4ade80, #5a87ff);
-  border-radius: inherit;
-  transform-origin: left;
+.pin-detail-card__author-rating {
+  font-size: clamp(11px, 0.75rem, 12px);
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 2px;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 /* Метка меток общего рейтинга больше не отображается */
@@ -2059,6 +2082,32 @@ html {
   color: #fff;
 }
 
+
+@keyframes reputation-level-up {
+  0% { box-shadow: 0 0 0 rgba(0,0,0,0); transform: scale(1); }
+  25% { box-shadow: 0 0 12px rgba(255,255,255,0.45); transform: scale(1.08); }
+  50% { box-shadow: 0 0 20px rgba(255,255,255,0.35); transform: scale(1.05); }
+  75% { box-shadow: 0 0 10px rgba(255,255,255,0.2); transform: scale(1.02); }
+  100% { box-shadow: 0 0 0 rgba(0,0,0,0); transform: scale(1); }
+}
+
+.author-inline__name-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.author-inline__verified {
+  color: #1da1f2;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.author-inline__active-recently {
+  font-size: 14px;
+  line-height: 1;
+}
+
 .pin-detail-card__chips {
   display: flex;
   gap: 10px;
@@ -2090,15 +2139,22 @@ html {
 }
 
 .pin-detail-card__description {
-  background: #1c1c1c;
-  border-radius: 16px;
-  padding: 8px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: transparent;
+  border-radius: 0;
+  padding: 4px 0 0;
+  border: none;
   color: #e5e7eb;
   line-height: 1.4;
   min-height: 0;
   max-height: none;
   display: block;
+}
+
+.pin-detail-card__title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #f6f6f8;
+  margin-bottom: 6px;
 }
 
 .pin-detail-card__description p {
