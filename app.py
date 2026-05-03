@@ -988,6 +988,22 @@ def create_app() -> Flask:
                 payload = []
             subscriptions_payload = []
             unique_nicknames = {n for n in payload if n}
+            if LOCAL_MODE:
+                for nickname in payload:
+                    if not nickname:
+                        continue
+                    try:
+                        author_state = _build_user_state(nickname)
+                    except Exception:
+                        continue
+                    subscriptions_payload.append(
+                        {
+                            "nickname": author_state.get("nickname"),
+                            "avatar_url": author_state.get("avatar_url"),
+                        }
+                    )
+                return {"subscriptions": subscriptions_payload}, 200
+
             profile_map: dict[str, dict] = {}
             if unique_nicknames:
                 from sqlalchemy import select
