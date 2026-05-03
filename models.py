@@ -192,7 +192,7 @@ class Pin:
                 return group["color"]
         return "#ffffff"
 
-    def to_dict(self) -> Dict:
+    def to_dict(self, *, vote_counts: tuple[int, int] | None = None) -> Dict:
         payload = asdict(self)
         payload["created_at"] = self.created_at.isoformat()
         payload["expires_at"] = self.expires_at.isoformat() if self.expires_at else None
@@ -201,7 +201,10 @@ class Pin:
         payload["category"] = self.category
         payload["user_id"] = self.user_id
         payload["comments"] = self.comments
-        likes, dislikes = vote_counts_for_pin(self.id)
+        if vote_counts is not None:
+            likes, dislikes = vote_counts
+        else:
+            likes, dislikes = vote_counts_for_pin(self.id, self.metadata)
         payload["rating"] = likes - dislikes
         payload["likes_count"] = likes
         payload["dislikes_count"] = dislikes
@@ -484,6 +487,56 @@ def vote_counts_for_pin(
         with session_scope() as scoped_session:
             return _load_counts(scoped_session)
     return _load_counts(session)
+
+
+def vote_counts_for_pins(
+    pin_ids: list[int],
+    *,
+    session: object | None = None,
+) -> dict[int, tuple[int, int]]:
+    """
+    Batch-загрузка лайков/дизлайков для списка пинов одним SQL-запросом.
+    Возвращает словарь {pin_id: (likes, dislikes)}.
+    Для пинов без голосов возвращается (0, 0).
+    """
+    result: dict[int, tuple[int, int]] = {pid: (0, 0) for pid in pin_ids}
+    if not pin_ids:
+        return result
+    if LOCAL_MODE:
+        # В локальном режиме счётчики считает сам Pin.to_dict через metadata,
+        # этот helper используется только в SQL-режиме.
+        return result
+
+    from sqlalchemy import func, select
+
+    def _load(active_session: object) -> dict[int, tuple[int, int]]:
+        stmt = (
+            select(
+                votes_table.c.pin_id,
+                votes_table.c.vote_value,
+                func.count().label("cnt"),
+            )
+            .where(votes_table.c.pin_id.in_(pin_ids))
+            .group_by(votes_table.c.pin_id, votes_table.c.vote_value)
+        )
+        rows = active_session.execute(stmt).all()
+        acc: dict[int, list[int]] = {pid: [0, 0] for pid in pin_ids}
+        for row in rows:
+            pid = int(row.pin_id)
+            val = int(row.vote_value)
+            cnt = int(row.cnt)
+            if pid not in acc:
+                acc[pid] = [0, 0]
+            if val == 1:
+                acc[pid][0] = cnt
+            elif val == -1:
+                acc[pid][1] = cnt
+        return {pid: (pair[0], pair[1]) for pid, pair in acc.items()}
+
+    if session is None:
+        with session_scope() as scoped_session:
+            return _load(scoped_session)
+    return _load(session)
 
 
 def create_pin(

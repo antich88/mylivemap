@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import json
@@ -20,23 +21,23 @@ except ImportError:  # pragma: no cover - optional dependency
     cloudinary_url_for = None
 from auth_store import (
     NicknameAlreadyExistsError,
-    _clamp_points,
     add_user_subscription,
-    adjust_user_reputation,
+    _clamp_points,
     calculate_reputation_level,
     create_user,
     get_or_create_user_profile,
-    get_reputation_state,
     get_user_by_nickname,
     get_user_subscriptions,
     remove_user_subscription,
     rename_user_profile,
-    set_level_up_pending,
     update_user_avatar_path,
     update_user_nickname,
     update_user_password,
     update_user_profile_fields,
     verify_user_credentials,
+    adjust_user_reputation,
+    set_level_up_pending,
+    get_reputation_state,
 )
 from config import (
     ALLOWED_AVATAR_EXTENSIONS,
@@ -79,6 +80,7 @@ from models import (
     record_vote,
     reassign_user_id,
     user_votes_for_pins,
+    vote_counts_for_pins,
 )
 
 USER_MARKER_LIMIT = 5
@@ -624,10 +626,17 @@ def create_app() -> Flask:
             threshold = request.args.get("rating", default=-999, type=int)
             allowed = categories.split(",") if categories else None
             pins = active_pins(allowed_subcategories=allowed, rating_threshold=threshold)
+
+            # Батч-подсчёт голосов одним SQL-запросом для всех пинов сразу.
+            # Устраняет N+1 (было 2N запросов в vote_counts_for_pin).
+            pin_ids = [p.id for p in pins if p.id is not None]
+            vote_counts_map = vote_counts_for_pins(pin_ids)
+
             authors_cache: dict[str, dict] = {}
             response_payload = []
             for pin in pins:
-                payload = pin.to_dict()
+                counts = vote_counts_map.get(pin.id, (0, 0))
+                payload = pin.to_dict(vote_counts=counts)
                 user_id = pin.user_id
                 if user_id:
                     author = authors_cache.get(user_id)
@@ -649,7 +658,9 @@ def create_app() -> Flask:
                 else:
                     payload["author"] = None
                 response_payload.append(payload)
-            return jsonify(response_payload)
+            response = jsonify(response_payload)
+            response.headers["Cache-Control"] = "private, max-age=15"
+            return response
 
         payload = request.get_json()
         if not payload:
