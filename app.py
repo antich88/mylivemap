@@ -639,6 +639,90 @@ def create_app() -> Flask:
             active_authors_set = active_authors_recently(unique_user_ids)
 
             authors_cache: dict[str, dict] = {}
+
+            if unique_user_ids:
+                if LOCAL_MODE:
+                    for user_id in unique_user_ids:
+                        authors_cache[user_id] = _build_author_preview(user_id)
+                else:
+                    from sqlalchemy import func, select
+
+                    now_iso = datetime.now(timezone.utc)
+                    with session_scope() as session:
+                        profile_stmt = select(
+                            profiles_table.c.nickname,
+                            profiles_table.c.age,
+                            profiles_table.c.gender,
+                            profiles_table.c.avatar_path,
+                            profiles_table.c.reputation_points,
+                            profiles_table.c.level_up_pending,
+                            profiles_table.c.is_verified,
+                            profiles_table.c.created_at,
+                            profiles_table.c.updated_at,
+                        ).where(profiles_table.c.nickname.in_(unique_user_ids))
+                        profile_rows = session.execute(profile_stmt).mappings().all()
+
+                        rating_stmt = (
+                            select(
+                                pins_table.c.user_id,
+                                func.coalesce(func.sum(pins_table.c.rating), 0).label("rating_total"),
+                            )
+                            .where(
+                                pins_table.c.user_id.in_(unique_user_ids),
+                                (pins_table.c.expires_at.is_(None) | (pins_table.c.expires_at > now_iso)),
+                            )
+                            .group_by(pins_table.c.user_id)
+                        )
+                        rating_rows = session.execute(rating_stmt).mappings().all()
+
+                    rating_map = {
+                        row["user_id"]: int(row.get("rating_total") or 0) for row in rating_rows
+                    }
+
+                    for user_id in unique_user_ids:
+                        authors_cache[user_id] = {
+                            "nickname": user_id,
+                            "age": None,
+                            "gender": None,
+                            "avatar_url": None,
+                            "rating_total": rating_map.get(user_id, 0),
+                            "reputation_points": 0,
+                            "reputation_level": 0,
+                            "level_up_pending": False,
+                            "is_verified": False,
+                        }
+
+                    for row in profile_rows:
+                        nickname = row.get("nickname")
+                        if not nickname:
+                            continue
+                        base = authors_cache.get(nickname)
+                        if base is None:
+                            base = {
+                                "nickname": nickname,
+                                "age": None,
+                                "gender": None,
+                                "avatar_url": None,
+                                "rating_total": rating_map.get(nickname, 0),
+                                "reputation_points": 0,
+                                "reputation_level": 0,
+                                "level_up_pending": False,
+                                "is_verified": False,
+                            }
+                            authors_cache[nickname] = base
+
+                        profile_dict = dict(row)
+                        points = _clamp_points(profile_dict.get("reputation_points", 0))
+                        base["reputation_points"] = points
+                        base["reputation_level"] = calculate_reputation_level(points)
+                        base["level_up_pending"] = bool(profile_dict.get("level_up_pending") or False)
+                        base["is_verified"] = bool(profile_dict.get("is_verified") or False)
+
+                        serialized = _serialize_profile(profile_dict)
+                        if serialized:
+                            base["age"] = serialized.get("age")
+                            base["gender"] = serialized.get("gender")
+                            base["avatar_url"] = serialized.get("avatar_url")
             response_payload = []
             for pin in pins:
                 counts = vote_counts_map.get(pin.id, (0, 0))
@@ -647,7 +731,17 @@ def create_app() -> Flask:
                 if user_id:
                     author = authors_cache.get(user_id)
                     if author is None:
-                        author = _build_author_preview(user_id)
+                        author = {
+                            "nickname": user_id,
+                            "age": None,
+                            "gender": None,
+                            "avatar_url": None,
+                            "rating_total": 0,
+                            "reputation_points": 0,
+                            "reputation_level": 0,
+                            "level_up_pending": False,
+                            "is_verified": False,
+                        }
                         authors_cache[user_id] = author
                     payload["author"] = {
                         "nickname": author.get("nickname") or user_id,
