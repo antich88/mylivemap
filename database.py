@@ -73,6 +73,7 @@ else:
         Table,
         Text,
         UniqueConstraint,
+        Index,
         create_engine,
         inspect,
         text,
@@ -88,8 +89,16 @@ else:
     engine_kwargs = {
         "pool_pre_ping": True,
         "future": True,
-        **_sqlite_kwargs(DATABASE_URL),
     }
+    # параметры пула только для Postgres (для SQLite они бессмысленны и могут ломать)
+    if not DATABASE_URL.startswith("sqlite"):
+        engine_kwargs.update({
+            "pool_size": 5,
+            "max_overflow": 10,
+            "pool_recycle": 280,
+            "pool_timeout": 30,
+        })
+    engine_kwargs.update(_sqlite_kwargs(DATABASE_URL))
 
     engine_url = DATABASE_URL or ""
     if engine_url.startswith("postgres://"):
@@ -136,6 +145,8 @@ else:
         Column("image_url", String(512)),
         UniqueConstraint("shared_token", name="uq_pins_shared_token"),
     )
+    Index("ix_pins_user_created", pins_table.c.user_id, pins_table.c.created_at)
+    Index("ix_pins_user_expires", pins_table.c.user_id, pins_table.c.expires_at)
 
     users_table = Table(
         "users",
