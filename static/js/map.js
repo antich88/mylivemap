@@ -1448,19 +1448,28 @@ function openAuthorSheet(pin) {
   }
   currentAuthorSheetPinId = pinId;
 
-  const handlePinData = (freshPin) => {
-    const resolvedPin = freshPin || pin;
-    if (freshPin) {
-      updateActiveMarkerEntry(freshPin);
-    }
-    renderAuthorSheetForPin(resolvedPin);
-  };
+  renderAuthorSheetForPin(pin);
 
-  fetchPinDetails(pinId).then((freshPin) => {
-    handlePinData(freshPin);
-  }).catch(() => {
-    handlePinData(pin);
-  });
+  fetchPinDetails(pinId)
+    .then((freshPin) => {
+      if (!freshPin || currentAuthorSheetPinId !== pinId) {
+        return;
+      }
+      updateActiveMarkerEntry(freshPin);
+      updatePopupRating(pinId, freshPin.rating);
+      const voteButtons = document.querySelector(`.pin-popup__vote-buttons[data-pin-id="${pinId}"]`);
+      if (voteButtons) {
+        const likesElem = voteButtons.querySelector('[data-pin-likes-count]');
+        const dislikesElem = voteButtons.querySelector('[data-pin-dislikes-count]');
+        if (likesElem && Number.isFinite(freshPin.likes_count)) {
+          likesElem.textContent = freshPin.likes_count;
+        }
+        if (dislikesElem && Number.isFinite(freshPin.dislikes_count)) {
+          dislikesElem.textContent = freshPin.dislikes_count;
+        }
+      }
+    })
+    .catch(console.error);
 }
 
 function centerMapUnderSheet(latlng, sheet) {
