@@ -992,12 +992,12 @@ def create_app() -> Flask:
             if unique_nicknames:
                 from sqlalchemy import select
 
-                with session_scope() as session:
+                with session_scope() as db_session:
                     profile_stmt = select(
                         profiles_table.c.nickname,
                         profiles_table.c.avatar_path,
                     ).where(profiles_table.c.nickname.in_(unique_nicknames))
-                    profile_rows = session.execute(profile_stmt).mappings().all()
+                    profile_rows = db_session.execute(profile_stmt).mappings().all()
                 for row in profile_rows:
                     nickname_key = row.get("nickname")
                     if not nickname_key:
