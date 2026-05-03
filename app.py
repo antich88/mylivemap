@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import BinaryIO
 
@@ -19,21 +20,23 @@ except ImportError:  # pragma: no cover - optional dependency
     cloudinary_url_for = None
 from auth_store import (
     NicknameAlreadyExistsError,
+    _clamp_points,
     add_user_subscription,
+    adjust_user_reputation,
+    calculate_reputation_level,
     create_user,
     get_or_create_user_profile,
+    get_reputation_state,
     get_user_by_nickname,
     get_user_subscriptions,
     remove_user_subscription,
     rename_user_profile,
+    set_level_up_pending,
     update_user_avatar_path,
     update_user_nickname,
     update_user_password,
     update_user_profile_fields,
     verify_user_credentials,
-    adjust_user_reputation,
-    set_level_up_pending,
-    get_reputation_state,
 )
 from config import (
     ALLOWED_AVATAR_EXTENSIONS,
@@ -52,7 +55,14 @@ from config import (
     SECRET_KEY,
     SHARING_META,
 )
-from database import ensure_connection, init_schema
+from database import (
+    LOCAL_MODE,
+    ensure_connection,
+    init_schema,
+    pins_table,
+    profiles_table,
+    session_scope,
+)
 from models import (
     active_pins,
     add_comment,
@@ -197,6 +207,72 @@ def create_app() -> Flask:
             base["subscriptions"] = get_user_subscriptions(nickname)
         except Exception:  # pragma: no cover
             base["subscriptions"] = []
+        return base
+
+    def _build_author_preview(nickname: str) -> dict:
+        """Лёгкая версия профиля автора для попапа метки.
+        Вытаскивает rating + profile одним запросом вместо 4 отдельных.
+        Не тянет subscriptions (для попапа не нужны)."""
+        from sqlalchemy import func, select
+
+        base = {
+            "nickname": nickname,
+            "age": None,
+            "gender": None,
+            "avatar_url": None,
+            "rating_total": 0,
+            "reputation_points": 0,
+            "reputation_level": 0,
+            "level_up_pending": False,
+            "is_verified": False,
+        }
+
+        if LOCAL_MODE:
+            return _build_user_state(nickname)
+
+        now_iso = datetime.now(timezone.utc)
+        try:
+            with session_scope() as session:
+                profile_stmt = select(
+                    profiles_table.c.nickname,
+                    profiles_table.c.age,
+                    profiles_table.c.gender,
+                    profiles_table.c.avatar_path,
+                    profiles_table.c.reputation_points,
+                    profiles_table.c.level_up_pending,
+                    profiles_table.c.is_verified,
+                    profiles_table.c.created_at,
+                    profiles_table.c.updated_at,
+                ).where(profiles_table.c.nickname == nickname)
+                profile_row = session.execute(profile_stmt).mappings().first()
+
+                rating_stmt = (
+                    select(func.coalesce(func.sum(pins_table.c.rating), 0))
+                    .where(
+                        pins_table.c.user_id == nickname,
+                        (pins_table.c.expires_at.is_(None) | (pins_table.c.expires_at > now_iso)),
+                    )
+                )
+                rating_total = int(session.execute(rating_stmt).scalar() or 0)
+
+            base["rating_total"] = rating_total
+
+            if profile_row:
+                profile_dict = dict(profile_row)
+                points = _clamp_points(profile_dict.get("reputation_points", 0))
+                base["reputation_points"] = points
+                base["reputation_level"] = calculate_reputation_level(points)
+                base["level_up_pending"] = bool(profile_dict.get("level_up_pending") or False)
+                base["is_verified"] = bool(profile_dict.get("is_verified") or False)
+
+                serialized = _serialize_profile(profile_dict)
+                if serialized:
+                    base["age"] = serialized.get("age")
+                    base["gender"] = serialized.get("gender")
+                    base["avatar_url"] = serialized.get("avatar_url")
+        except Exception as exc:
+            app.logger.exception("_build_author_preview failed for %s: %s", nickname, exc)
+
         return base
 
     def current_user_payload() -> dict | None:
@@ -556,7 +632,7 @@ def create_app() -> Flask:
                 if user_id:
                     author = authors_cache.get(user_id)
                     if author is None:
-                        author = _build_user_state(user_id)
+                        author = _build_author_preview(user_id)
                         authors_cache[user_id] = author
                     payload["author"] = {
                         "nickname": author.get("nickname") or user_id,
