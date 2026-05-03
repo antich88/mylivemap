@@ -987,15 +987,33 @@ def create_app() -> Flask:
             except Exception:  # pragma: no cover
                 payload = []
             subscriptions_payload = []
+            unique_nicknames = {n for n in payload if n}
+            profile_map: dict[str, dict] = {}
+            if unique_nicknames:
+                from sqlalchemy import select
+
+                with session_scope() as session:
+                    profile_stmt = select(
+                        profiles_table.c.nickname,
+                        profiles_table.c.avatar_path,
+                    ).where(profiles_table.c.nickname.in_(unique_nicknames))
+                    profile_rows = session.execute(profile_stmt).mappings().all()
+                for row in profile_rows:
+                    nickname = row.get("nickname")
+                    if not nickname:
+                        continue
+                    profile_map[nickname] = dict(row)
             for nickname in payload:
-                try:
-                    author_state = _build_user_state(nickname)
-                except Exception:
+                if not nickname:
                     continue
+                serialized = None
+                profile_dict = profile_map.get(nickname)
+                if profile_dict:
+                    serialized = _serialize_profile(profile_dict)
                 subscriptions_payload.append(
                     {
-                        "nickname": author_state.get("nickname"),
-                        "avatar_url": author_state.get("avatar_url"),
+                        "nickname": nickname,
+                        "avatar_url": serialized.get("avatar_url") if serialized else None,
                     }
                 )
             return {"subscriptions": subscriptions_payload}, 200
