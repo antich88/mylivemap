@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, Iterator
 
@@ -267,3 +268,35 @@ else:
 
 
     _ensure_remote_schema_updates()
+
+
+def active_authors_recently(user_ids, days: int = 7) -> set:
+    """Батч-версия is_author_active_recently.
+    Возвращает set user_id, у которых есть хотя бы один pin за последние `days` дней.
+    В продакшене — один SQL. В LOCAL_MODE — fallback на поштучную проверку."""
+    if not user_ids:
+        return set()
+    user_ids = list({uid for uid in user_ids if uid})
+    if not user_ids:
+        return set()
+
+    if LOCAL_MODE:
+        from models import is_author_active_recently
+
+        # Fallback: в локальном режиме данных мало, производительность не критична.
+        return {uid for uid in user_ids if is_author_active_recently(uid, days=days)}
+
+    threshold = datetime.now(timezone.utc) - timedelta(days=days)
+
+    from sqlalchemy import select, distinct
+
+    with session_scope() as session:
+        stmt = (
+            select(distinct(pins_table.c.user_id))
+            .where(
+                pins_table.c.user_id.in_(user_ids),
+                pins_table.c.created_at >= threshold,
+            )
+        )
+        rows = session.execute(stmt).all()
+    return {row[0] for row in rows if row[0]}

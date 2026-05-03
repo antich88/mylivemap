@@ -58,6 +58,7 @@ from config import (
 )
 from database import (
     LOCAL_MODE,
+    active_authors_recently,
     ensure_connection,
     init_schema,
     pins_table,
@@ -215,7 +216,6 @@ def create_app() -> Flask:
         """Лёгкая версия профиля автора для попапа метки.
         Вытаскивает rating + profile одним запросом вместо 4 отдельных.
         Не тянет subscriptions (для попапа не нужны)."""
-        from sqlalchemy import func, select
 
         base = {
             "nickname": nickname,
@@ -231,6 +231,8 @@ def create_app() -> Flask:
 
         if LOCAL_MODE:
             return _build_user_state(nickname)
+
+        from sqlalchemy import func, select
 
         now_iso = datetime.now(timezone.utc)
         try:
@@ -632,6 +634,10 @@ def create_app() -> Flask:
             pin_ids = [p.id for p in pins if p.id is not None]
             vote_counts_map = vote_counts_for_pins(pin_ids)
 
+            # Батч-проверка "активен ли автор за последние 7 дней" — один SQL вместо N
+            unique_user_ids = {p.user_id for p in pins if p.user_id}
+            active_authors_set = active_authors_recently(unique_user_ids)
+
             authors_cache: dict[str, dict] = {}
             response_payload = []
             for pin in pins:
@@ -651,7 +657,7 @@ def create_app() -> Flask:
                         "reputation_level": author.get("reputation_level"),
                         "level_up_pending": author.get("level_up_pending"),
                         "is_verified": author.get("is_verified"),
-                        "is_active_recently": is_author_active_recently(user_id),
+                        "is_active_recently": user_id in active_authors_set,
                         "age": author.get("age"),
                         "gender": author.get("gender"),
                     }
