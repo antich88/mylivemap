@@ -918,10 +918,10 @@ def create_app() -> Flask:
             )
             return jsonify(payload)
 
-        user = current_user_payload()
-        if not user:
+        nickname = session.get("user_nickname")
+        if not nickname:
             return jsonify({"message": "Нужно войти в аккаунт, чтобы удалять метки."}), 401
-        user_id = user["nickname"]
+        user_id = nickname
         owner = get_pin_owner(pin_id)
         if owner is None:
             abort(404)
@@ -935,8 +935,8 @@ def create_app() -> Flask:
 
     @app.route("/api/pins/<int:pin_id>/vote", methods=["POST"])
     def vote(pin_id: int) -> tuple[dict, int]:
-        user = current_user_payload()
-        if not user:
+        nickname = session.get("user_nickname")
+        if not nickname:
             app.logger.debug("vote denied: unauthenticated request for pin_id=%s", pin_id)
             return {"message": "Нужно войти в аккаунт чтобы голосовать."}, 401
         payload = request.get_json(silent=True) or {}
@@ -951,7 +951,7 @@ def create_app() -> Flask:
             vote_value = parse_vote(payload.get("delta"))
         if vote_value is None:
             vote_value = 1
-        result = record_vote(pin_id, user["nickname"], vote_value)
+        result = record_vote(pin_id, nickname, vote_value)
         if not result:
             abort(404)
         response_payload = {
@@ -964,12 +964,12 @@ def create_app() -> Flask:
         # apply reputation delta to pin owner
         if result.get("reputation_delta") and result["pin_owner"]:
             adjust_user_reputation(result["pin_owner"], result["reputation_delta"], trigger_level_up=True)
-        if result.get("profile_rating") is not None and result["pin_owner"] == user["nickname"]:
+        if result.get("profile_rating") is not None and result["pin_owner"] == nickname:
             response_payload["profile_rating"] = result["profile_rating"]
         app.logger.info(
             "vote recorded: pin_id=%s user=%s vote=%s rating=%s",
             pin_id,
-            user["nickname"],
+            nickname,
             response_payload["vote_value"],
             response_payload["pin_rating"],
         )
@@ -977,13 +977,13 @@ def create_app() -> Flask:
 
     @app.route("/api/subscriptions", methods=["GET", "POST", "DELETE"])
     def manage_subscriptions() -> tuple[dict, int]:
-        user = current_user_payload()
-        if not user:
+        nickname = session.get("user_nickname")
+        if not nickname:
             return {"message": "Нужно войти в аккаунт."}, 401
         if request.method == "GET":
             payload = []
             try:
-                payload = get_user_subscriptions(user["nickname"])
+                payload = get_user_subscriptions(nickname)
             except Exception:  # pragma: no cover
                 payload = []
             subscriptions_payload = []
@@ -999,10 +999,10 @@ def create_app() -> Flask:
                     ).where(profiles_table.c.nickname.in_(unique_nicknames))
                     profile_rows = session.execute(profile_stmt).mappings().all()
                 for row in profile_rows:
-                    nickname = row.get("nickname")
-                    if not nickname:
+                    nickname_key = row.get("nickname")
+                    if not nickname_key:
                         continue
-                    profile_map[nickname] = dict(row)
+                    profile_map[nickname_key] = dict(row)
             for nickname in payload:
                 if not nickname:
                     continue
@@ -1022,16 +1022,16 @@ def create_app() -> Flask:
         if not author:
             return {"message": "Никнейм автора не указан."}, 400
         if request.method == "POST":
-            add_user_subscription(user["nickname"], author)
+            add_user_subscription(nickname, author)
             return {"message": "Подписка добавлена."}, 200
         return {"message": "Неверный метод."}, 405
 
     @app.route("/api/subscriptions/<path:author_nickname>", methods=["DELETE"])
     def delete_subscription(author_nickname: str) -> tuple[dict, int]:
-        user = current_user_payload()
-        if not user:
+        nickname = session.get("user_nickname")
+        if not nickname:
             return {"message": "Нужно войти в аккаунт."}, 401
-        remove_user_subscription(user["nickname"], author_nickname)
+        remove_user_subscription(nickname, author_nickname)
         return {"message": "Подписка удалена."}, 200
 
     @app.route("/api/user/level-up-acknowledged", methods=["POST"])
@@ -1044,8 +1044,8 @@ def create_app() -> Flask:
 
     @app.route("/api/user/votes", methods=["GET"])
     def user_votes_route() -> tuple[dict, int]:
-        user = current_user_payload()
-        if not user:
+        nickname = session.get("user_nickname")
+        if not nickname:
             return {"votes": {}}, 200
         raw_ids = request.args.get("pins", "")
         pin_ids: list[int] = []
@@ -1056,7 +1056,7 @@ def create_app() -> Flask:
                 continue
             if parsed > 0:
                 pin_ids.append(parsed)
-        votes = user_votes_for_pins(user["nickname"], pin_ids)
+        votes = user_votes_for_pins(nickname, pin_ids)
         return {"votes": votes}, 200
 
     @app.route("/pin/<token>")
