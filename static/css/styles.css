@@ -851,9 +851,9 @@ html {
   backdrop-filter: blur(12px) saturate(180%) !important;
   -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
   border: 1.5px solid var(--chip-color) !important;
-  border-radius: 12px !important;
-  padding: 6px 12px !important;
-  gap: 8px;
+  border-radius: 14px !important;
+  padding: 2px 6px 2px 2px !important;
+  gap: 10px;
   white-space: nowrap;
   box-shadow: 0 0 15px var(--chip-color), 0 10px 25px rgba(0, 0, 0, 0.5) !important;
   color: #ffffff !important;
@@ -900,6 +900,37 @@ html {
   background: var(--chip-color);
   border-radius: 50%;
   box-shadow: 0 0 10px var(--chip-color);
+}
+
+.marker-status-dot.has-avatar {
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border-radius: 50%;
+  border: 1.5px solid #fff;
+  box-shadow: 0 0 0 1px var(--chip-color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.marker-status-dot.has-avatar:hover {
+  transform: scale(1.2);
+  transition: transform 0.2s ease-in-out;
+  z-index: 1000;
+}
+
+.marker-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
+}
+
+.custom-marker-label .marker-text {
+  margin-right: 4px;
 }
 
 .map-shell {
@@ -1133,9 +1164,6 @@ html {
 .profile-info-text { text-align: center; margin-bottom: 1.5rem; }
 .profile-info-text .profile-name { font-size: 1.35rem; font-weight: 700; color: #fff; margin: 0 0 0.3rem 0; }
 .profile-info-text .profile-demographics { font-size: 0.85rem; color: #8b94b0; margin: 0 0 0.6rem 0; }
-.profile-stars { display: flex; justify-content: center; gap: 0.25rem; font-size: 1rem; }
-.profile-stars .star-filled { color: #fbbf24; }
-.profile-stars .star-empty { color: #334155; }
 
 /* 3 Карточки статистики */
 .profile-stats-row {
@@ -3222,6 +3250,8 @@ button.author-inline.pin-detail-card__author-trigger {
   color: #fff;
 }
 
+/* Новый компактный бейдж статуса (Soft, 10px) */
+
 .profile-action {
   flex: 1;
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -3825,3 +3855,55 @@ button.author-inline.pin-detail-card__author-trigger {
     font-size: 12px;
   }
 }
+
+/* Финальные стили для кнопки автора и бейджа статуса */
+.author-ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  color: #ffffff;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background-color 0.2s ease, color 0.2s ease;
+  outline: none;
+}
+
+.author-ghost-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.author-ghost-btn .author-name-text {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+/* --- ТОЧНОЕ СООТВЕТСТВИЕ: Soft Mini (10px) --- */
+.user-status-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  padding: 2px 6px !important;
+  border-radius: 4px !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  line-height: 1 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  border: none !important;
+  cursor: default !important;
+}
+
+.user-status-badge .status-badge-icon {
+  font-size: 10px !important;
+}
+
+.status-novice   { background: rgba(74, 222, 128, 0.15) !important; color: #4ade80 !important; }
+.status-active   { background: rgba(56, 189, 248, 0.15) !important; color: #38bdf8 !important; }
+.status-verified { background: rgba(96, 165, 250, 0.15) !important; color: #60a5fa !important; }
+.status-expert   { background: rgba(168, 85, 247, 0.15) !important; color: #a855f7 !important; }
+.status-legend   { background: rgba(251, 191, 36, 0.15) !important; color: #fbbf24 !important; }

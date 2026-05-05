@@ -251,9 +251,7 @@
                             <span id="profile-view-age">{{ current_user.age if current_user and current_user.age else '26' }}</span> лет •
                             <span id="profile-view-gender">{{ gender_labels.get(current_user.gender, 'Мужской') if current_user else 'Мужской' }}</span>
                           </p>
-                          <div class="profile-stars">
-                            <span class="star-filled">★</span><span class="star-filled">★</span><span class="star-filled">★</span><span class="star-filled">★</span><span class="star-empty">★</span>
-                          </div>
+                          <div id="profile-view-status-badge" style="display: flex; justify-content: center; margin-top: 6px;"></div>
                         </div>
 
                         <div class="profile-stats-row">

@@ -24,11 +24,11 @@ const SUBSCRIPTION_STORAGE_KEY = 'liveMapSubscribedAuthors';
 
 // Конфигурация уровней репутации (ключи строго числовые 1–5)
 const REPUTATION_LEVELS_CONFIG = {
-  1: { key: 'novice', label: 'Новичок', icon: '🌱', bgColor: '#9e9e9e', bgGradient: 'linear-gradient(90deg, #9e9e9e, #b0bec5)' },
-  2: { key: 'active', label: 'Активный', icon: '⚡', bgColor: '#4caf50', bgGradient: 'linear-gradient(90deg, #43a047, #66bb6a)' },
-  3: { key: 'verified', label: 'Проверенный', icon: '🛡', bgColor: '#2196f3', bgGradient: 'linear-gradient(90deg, #1e88e5, #42a5f5)' },
-  4: { key: 'expert', label: 'Эксперт', icon: '👑', bgColor: '#9c27b0', bgGradient: 'linear-gradient(90deg, #8e24aa, #ba68c8)' },
-  5: { key: 'legend', label: 'Легенда', icon: '💎', bgColor: '#ffd700', bgGradient: 'linear-gradient(90deg, #ffd700, #ffa000)' },
+  1: { key: 'novice', label: 'Новичок', icon: '🌱' },
+  2: { key: 'active', label: 'Активный', icon: '⚡' },
+  3: { key: 'verified', label: 'Проверенный', icon: '🛡' },
+  4: { key: 'expert', label: 'Эксперт', icon: '👑' },
+  5: { key: 'legend', label: 'Легенда', icon: '💎' },
 };
 let levelUpAckedOnce = false;
 
@@ -1074,16 +1074,14 @@ function renderPinAuthorIntro(pin, isSelf = false) {
         <span class="pin-popup__author-label">Автор</span>
         <button
           type="button"
-          class="pin-popup__author-nickname-btn"
+          class="author-ghost-btn"
           data-author-panel-trigger
           data-author-self="${isSelf ? 'true' : 'false'}"
           data-author-link
           data-author-id="${safeAuthorId}"
         >
-          <span class="pin-popup__author-link author-inline">
-            <span class="pin-popup__author-nickname author-inline__name">${safeNickname}</span>
-            <span class="author-inline__name-icons">${indicators}</span>
-          </span>
+          <span class="author-name-text">${safeNickname}</span>
+          <span class="author-inline__name-icons">${indicators}</span>
         </button>
         ${badge}
       </div>
@@ -1100,20 +1098,18 @@ function renderReputationBadge(author = {}) {
   if (!config) {
     return '';
   }
-  const background = config.bgGradient || config.bgColor || '#4caf50';
   const authorId = escapeHtml(author.nickname || author.user_id || author.authorNick || '');
   const isSelf = authorId && currentAuthUser?.nickname === authorId;
   return `
     <button
       type="button"
-      class="pin-popup__author-badge pin-popup__author-badge--${config.key}"
-      style="background:${background}"
+      class="user-status-badge status-${config.key}"
       data-author-panel-trigger
       data-author-id="${authorId}"
       data-author-self="${isSelf ? 'true' : 'false'}"
     >
-      <span class="pin-popup__author-badge-icon" aria-hidden="true">${config.icon}</span>
-      <span class="pin-popup__author-badge-text">${escapeHtml(config.label)}</span>
+      <span class="status-badge-icon" aria-hidden="true">${config.icon}</span>
+      <span>${escapeHtml(config.label)}</span>
     </button>
   `;
 }
@@ -1676,7 +1672,7 @@ function createPopupContent(pin) {
           <div class="pin-detail-card__author-meta">
             <button
               type="button"
-              class="author-inline pin-detail-card__author-trigger"
+              class="author-ghost-btn pin-detail-card__author-trigger"
               data-author-panel-trigger
               data-author-id="${safeAuthorId}"
               data-author-self="${safeAuthorId && currentAuthUser?.nickname === safeAuthorId ? 'true' : 'false'}"
@@ -2870,7 +2866,11 @@ function initProfileSettings() {
      if (profileViewGenderEl) {
        profileViewGenderEl.textContent = formatProfileGender(profileSnapshot.gender);
      }
-   };
+      const badgeContainer = document.getElementById('profile-view-status-badge');
+      if (badgeContainer) {
+        badgeContainer.innerHTML = renderReputationBadge(currentAuthUser || {});
+      }
+  };
 
    const syncProfileSnapshot = () => {
     profileSnapshot = {
@@ -3561,9 +3561,16 @@ function createMarkerLabelIcon(pin) {
   const opacities = computeOpacityFromTTL(pin.ttl_seconds);
   const currentOpacity = opacities.strokeOpacity;
 
+  const avatarUrl = pin.author?.avatar_url;
+  const avatarMarkup = avatarUrl
+    ? `<img src="${avatarUrl}" class="marker-avatar-img" alt="" onerror="this.parentNode.classList.remove('has-avatar'); this.remove();">`
+    : '';
+
   const markerHtml = `
     <div class="custom-marker-label" style="--chip-color: ${categoryColor}; opacity: ${currentOpacity};">
-      <span class="marker-status-dot" aria-hidden="true"></span>
+      <span class="marker-status-dot ${avatarUrl ? 'has-avatar' : ''}" aria-hidden="true">
+        ${avatarMarkup}
+      </span>
       <span class="marker-text">${markerTitle}</span>
     </div>
   `;
@@ -3571,7 +3578,7 @@ function createMarkerLabelIcon(pin) {
     className: 'custom-marker-wrapper',
     html: markerHtml,
     iconSize: [0, 0],
-    iconAnchor: [0, 0],
+    iconAnchor: [0, -12],
     popupAnchor: [0, -32],
   });
 }
