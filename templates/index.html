@@ -136,41 +136,32 @@
       </div>
     </div>
     <div class="view-screen view-screen--people" data-view-screen="people">
-      <div class="view-screen__content">
-        <p class="view-screen__title">Люди поблизости</p>
-        <div class="people-cards">
-          <article class="people-card">
-            <span class="people-card__avatar" aria-hidden="true">А</span>
-            <div class="people-card__info">
-              <strong>Анна</strong>
-              <span>В радиусе 1 км</span>
-            </div>
-            <button type="button">Написать</button>
-          </article>
-          <article class="people-card">
-            <span class="people-card__avatar" aria-hidden="true">И</span>
-            <div class="people-card__info">
-              <strong>Илья</strong>
-              <span>В радиусе 1 км</span>
-            </div>
-            <button type="button">Написать</button>
-          </article>
-          <article class="people-card">
-            <span class="people-card__avatar" aria-hidden="true">Ж</span>
-            <div class="people-card__info">
-              <strong>Жанна</strong>
-              <span>В радиусе 1 км</span>
-            </div>
-            <button type="button">Написать</button>
-          </article>
-          <article class="people-card">
-            <span class="people-card__avatar" aria-hidden="true">В</span>
-            <div class="people-card__info">
-              <strong>Влад</strong>
-              <span>В радиусе 1 км</span>
-            </div>
-            <button type="button">Написать</button>
-          </article>
+      <div class="view-screen__content people-hub">
+        <div class="segmented-control">
+          <button class="tab-btn is-active" data-tab-target="subscriptions">Подписки</button>
+          <button class="tab-btn" data-tab-target="nearby">Рядом</button>
+          <button class="tab-btn" data-tab-target="search">Поиск</button>
+        </div>
+
+        <div class="people-tab-content is-active" id="tab-subscriptions">
+          <div id="people-subscriptions-list">
+            <p class="user-panel__subscriptions-empty" style="text-align: center; margin-top: 20px;">Пока нет подписок.</p>
+          </div>
+        </div>
+
+        <div class="people-tab-content" id="tab-nearby">
+          <div class="people-cards" id="people-nearby-list">
+             <p style="color: #9aa2c1; font-size: 13px; text-align: center; padding: 20px;">Функция в разработке...</p>
+          </div>
+        </div>
+
+        <div class="people-tab-content" id="tab-search">
+          <div class="search-input-wrapper">
+            <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input type="text" id="people-search-input" placeholder="Найти по никнейму..." autocomplete="off">
+          </div>
+          <button type="button" class="search-panel__btn" id="people-search-btn" style="width: 100%; margin-bottom: 16px;">Найти</button>
+          <div id="people-search-results" class="search-results is-hidden"></div>
         </div>
       </div>
     </div>
@@ -257,15 +248,15 @@
                         <div class="profile-stats-row">
                           <div class="profile-stat-card">
                             <span class="stat-val" id="profile-active-pins-count">{{ current_user.points_count|default(3) }}</span>
-                            <span class="stat-label">Активных<br>точек</span>
-                          </div>
-                          <div class="profile-stat-card">
-                            <span class="stat-val" id="profile-followers-count">{{ current_user.followers_count|default(12) }}</span>
-                            <span class="stat-label">Подписчиков</span>
+                            <span class="stat-label">Метки</span>
                           </div>
                           <div class="profile-stat-card">
                             <span class="stat-val" id="profile-view-rating" data-profile-rating>{{ current_user.rating_total|default('4.2') }}</span>
                             <span class="stat-label">Рейтинг</span>
+                          </div>
+                          <div class="profile-stat-card">
+                            <span class="stat-val" id="profile-followers-count">{{ current_user.followers_count|default(12) }}</span>
+                            <span class="stat-label">Подписчики</span>
                           </div>
                         </div>
                       </div>
@@ -344,7 +335,7 @@
 
                 <div class="user-panel__active-pins" data-active-pins-section>
                   <div class="user-panel__active-pins-header">
-                    <h3 class="user-panel__active-pins-title">Мои активные точки</h3>
+                    <h3 class="user-panel__active-pins-title">Мои метки</h3>
                     <span class="user-panel__active-pins-count" data-active-pins-count>0/5</span>
                   </div>
                   <div class="user-panel__active-pins-list" data-active-pins-list>
@@ -352,42 +343,7 @@
                   </div>
                 </div>
 
-                <section
-                  class="user-panel__subscriptions custom-dark-sub-card user-panel__active-pins"
-                  aria-label="Мои подписки"
-                  data-subscriptions-section
-                  style="background: rgba(255, 255, 255, 0.05) !important; border: 1px solid rgba(255, 255, 255, 0.1) !important;"
-                >
-                  <div class="user-panel__active-pins-header">
-                    <h3 class="user-panel__active-pins-title">Мои подписки</h3>
-                    <span class="user-panel__active-pins-count" data-subscriptions-count>0</span>
-                  </div>
-                  <div
-                    id="subscriptions-list"
-                    class="user-panel__active-pins-list"
-                    data-subscriptions-list
-                  >
-                    <p class="user-panel__subscriptions-empty">Войдите, чтобы увидеть подписки.</p>
-                  </div>
-                </section>
-
-                <section class="user-panel__friends search-panel" aria-label="Поиск друзей">
-                  <div class="search-panel__body">
-                    <label class="search-panel__field">
-                      <span class="search-panel__label">Поиск</span>
-                      <input
-                        id="friend-search-input"
-                        class="search-panel__input"
-                        type="text"
-                        autocomplete="off"
-                        placeholder="Найти по нику"
-                        aria-label="Никнейм для поиска"
-                      />
-                    </label>
-                    <button type="button" class="search-panel__btn" id="friend-search-btn">Найти</button>
-                  </div>
-                  <div id="search-results" class="search-results is-hidden" aria-live="polite"></div>
-                </section>
+                
 
                 <div class="user-panel__footer">
                   <button id="logout-btn" class="user-panel__logout" type="button" hidden>Выйти</button>

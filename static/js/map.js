@@ -1480,14 +1480,67 @@ function centerMapUnderSheet(latlng, sheet) {
   map.setView(targetLatLng, map.getZoom(), { animate: true, duration: 0.4 });
 }
 
+function renderAuthorProfileContent(author) {
+  const nickname = escapeHtml(author.nickname || 'Автор');
+  const avatarUrl = author.avatar_url ? escapeHtml(author.avatar_url) : '';
+  const letter = nickname.charAt(0).toUpperCase() || 'A';
+  const rating = formatAuthorRating(author.rating_total);
+  const followers = author.followers_count || 0;
+  const badgeMarkup = renderReputationBadge(author);
+  const age = formatAuthorAge(author.age);
+  const gender = formatAuthorGender(author.gender);
+
+  const avatarMarkup = avatarUrl
+    ? `<img src="${avatarUrl}" alt="Аватар" style="width:100%; height:100%; border-radius:50%; object-fit:cover;">`
+    : letter;
+
+  return `
+    <div class="author-header">
+      <div class="author-avatar-wrapper">
+        <div class="author-avatar-inner">${avatarMarkup}</div>
+      </div>
+      <div class="author-name">${nickname}</div>
+      <div class="profile-demographics" style="font-size: 0.85rem; color: #8b94b0; margin-bottom: 6px;">
+        <span>${age}</span> лет • <span>${gender}</span>
+      </div>
+      <div style="margin-top: 4px;">${badgeMarkup}</div>
+    </div>
+
+    <div class="author-stats-grid">
+      <div class="stat-card">
+        <span class="stat-value" data-author-active-pins-count>0</span>
+        <span class="stat-label">Метки</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value">${rating}</span>
+        <span class="stat-label">Рейтинг</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value">${followers}</span>
+        <span class="stat-label">Подписчики</span>
+      </div>
+    </div>
+
+    <button class="btn-subscribe author-panel__subscribe-btn">Подписаться</button>
+
+    <div class="author-section-title">Активные метки</div>
+    <div class="author-pins-list" data-author-active-pins-list>
+      <p style="color:#9aa2c1; font-size:13px; text-align:center;">Метки отсутствуют.</p>
+    </div>
+  `;
+}
+
 function showAuthorPanel(author) {
   const { panel, backdrop } = getAuthorSheetElements();
-  if (!panel) {
+  const content = document.getElementById('author-sheet-content');
+  if (!panel || !content) {
     return;
   }
-  updateAuthorPanelContent(author);
-  renderAuthorActivePinsList(author.nickname || '');
+
+  content.innerHTML = renderAuthorProfileContent(author);
   bindAuthorPanelSubscribeButton(author);
+  renderAuthorActivePinsList(author.nickname || '');
+
   panel.removeAttribute('hidden');
   if (backdrop) {
     backdrop.removeAttribute('hidden');
@@ -2128,35 +2181,41 @@ function getActivePinText(pin) {
 }
 
 function createActivePinMarkup(pin) {
-  const title = escapeHtml(pin.nickname || 'Метка');
+  const title = escapeHtml(pin.title || pin.nickname || 'Метка');
+  const categoryColor = pin.color || '#5a87ff';
   const meta = getActivePinText(pin);
+
   return `
-    <article class="user-panel__active-pin" data-active-pin-id="${pin.id}">
-      <a class="user-panel__active-pin-title" href="#" data-active-pin-title data-pin-id="${pin.id}">
-        ${title}
-      </a>
-      <div class="user-panel__active-pin-meta">
-        <span>${meta}</span>
+    <div class="pin-item">
+      <div class="pin-icon" style="background: color-mix(in srgb, ${categoryColor} 20%, transparent); color: ${categoryColor};">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
       </div>
-      <div class="user-panel__active-pin-actions">
-        <button type="button" class="user-panel__delete-pin-btn" data-active-pin-delete data-pin-id="${pin.id}">Удалить сейчас</button>
+      <div class="pin-info">
+        <span class="pin-title">${title}</span>
+        <span class="pin-meta">${meta}</span>
       </div>
-    </article>
+      <button type="button" class="pin-item__delete-btn" data-active-pin-delete data-pin-id="${pin.id}" title="Удалить">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </div>
   `;
 }
 
 function createAuthorActivePinMarkup(pin) {
-  const title = escapeHtml(pin.nickname || 'Метка');
+  const title = escapeHtml(pin.title || pin.nickname || 'Метка');
+  const categoryColor = pin.color || '#5a87ff';
   const meta = getActivePinText(pin);
+  
   return `
-    <article class="user-panel__active-pin author-panel__active-pin" data-author-pin-id="${pin.id}">
-      <a class="user-panel__active-pin-title" href="#" data-author-active-pin-link data-pin-id="${pin.id}">
-        ${title}
-      </a>
-      <div class="user-panel__active-pin-meta">
-        <span>${meta}</span>
+    <a href="#" class="pin-item" data-author-active-pin-link data-pin-id="${pin.id}">
+      <div class="pin-icon" style="background: color-mix(in srgb, ${categoryColor} 20%, transparent); color: ${categoryColor};">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
       </div>
-    </article>
+      <div class="pin-info">
+        <span class="pin-title">${title}</span>
+        <span class="pin-meta">${meta}</span>
+      </div>
+    </a>
   `;
 }
 
@@ -2188,9 +2247,9 @@ function renderAuthorActivePinsList(nickname) {
     return;
   }
   const pins = getActivePinsByNickname(nickname);
-  countEl.textContent = `${pins.length}/${USER_MARKER_LIMIT}`;
+  countEl.textContent = String(pins.length);
   if (!pins.length) {
-    listEl.innerHTML = '<p class="user-panel__active-pins-empty">Активных точек пока нет.</p>';
+    listEl.innerHTML = '<p class="user-panel__active-pins-empty">Активных меток пока нет.</p>';
     return;
   }
   listEl.innerHTML = pins.map((pin) => createAuthorActivePinMarkup(pin)).join('');
@@ -2215,75 +2274,50 @@ function ensureSubscriptionElements() {
 }
 
 function renderSubscriptionsList() {
-  const container = document.getElementById('subscriptions-list');
-  if (container) {
-    container.className = '';
-  }
-  const { subscriptionsListEl, subscriptionsCountEl } = ensureSubscriptionElements();
-  if (!subscriptionsListEl || !subscriptionsCountEl) {
-    return;
-  }
-  subscriptionsListEl.style.background = 'transparent';
+  const container = document.getElementById('people-subscriptions-list');
+  if (!container) return;
+
   const count = subscriptions.length;
-  subscriptionsCountEl.textContent = String(count);
   if (!count) {
-    subscriptionsListEl.innerHTML = '<p class="user-panel__subscriptions-empty">Пока нет подписок.</p>';
+    container.innerHTML = '<p class="user-panel__subscriptions-empty" style="text-align: center; margin-top: 20px;">Пока нет подписок.</p>';
     return;
   }
-  console.log('--- СУПЕР-ЧИСТКА JS v5 ---');
-  subscriptionsListEl.innerHTML = '';
+  
+  container.innerHTML = '';
   const fragment = document.createDocumentFragment();
+  
   subscriptions.forEach((subscription) => {
     const nickname = (subscription?.nickname || '').trim();
-    if (!nickname) {
-      return;
-    }
+    if (!nickname) return;
+    
     const safeNickname = escapeHtml(nickname);
     const letter = safeNickname.charAt(0).toUpperCase() || 'A';
     const avatarUrl = subscription?.avatar_url ? escapeHtml(subscription.avatar_url) : '';
+    
+    // Временно заглушка для статуса, пока API подписок не отдает reputation_level
+    const statusText = 'АВТОР'; 
 
-    const item = document.createElement('div');
-    item.dataset.subscriptionCard = '';
+    const item = document.createElement('a');
+    item.href = '#';
+    item.className = 'person-card';
+    item.dataset.subscriptionCardLink = '';
     item.dataset.authorNickname = safeNickname;
-    item.style.cssText = 'display:flex !important; flex-direction:row !important; align-items:center !important; height:48px !important; background:rgba(255,255,255,0.05) !important; margin-bottom:8px !important; padding:0 10px !important; border-radius:10px !important; width:100% !important;';
-
-    const link = document.createElement('a');
-    link.href = '#';
-    link.dataset.subscriptionCardLink = '';
-    link.dataset.authorNickname = safeNickname;
-    link.className = 'subscription-card__body';
-
-    const avatarWrapper = document.createElement('span');
-    avatarWrapper.className = 'subscription-card__avatar';
-    avatarWrapper.style.cssText = 'width:42px !important; height:42px !important; border-radius:50% !important; flex-shrink:0 !important; margin-right:12px !important; overflow:hidden !important;';
-
-    if (avatarUrl) {
-      const avatarImg = document.createElement('img');
-      avatarImg.src = avatarUrl;
-      avatarImg.alt = `Аватар ${safeNickname}`;
-      avatarImg.loading = 'lazy';
-      avatarImg.style.cssText = 'width:100% !important; height:100% !important; border-radius:50% !important; flex-shrink:0 !important; object-fit:cover !important; margin:0 !important;';
-      avatarWrapper.appendChild(avatarImg);
-    } else {
-      const placeholder = document.createElement('span');
-      placeholder.className = 'subscription-card__avatar-placeholder';
-      placeholder.setAttribute('aria-hidden', 'true');
-      placeholder.textContent = letter;
-      avatarWrapper.appendChild(placeholder);
-    }
-
-    const info = document.createElement('div');
-    info.className = 'subscription-card__info';
-    const nicknameSpan = document.createElement('span');
-    nicknameSpan.className = 'subscription-card__nickname';
-    nicknameSpan.textContent = safeNickname;
-    info.appendChild(nicknameSpan);
-
-    link.append(avatarWrapper, info);
-    item.appendChild(link);
+    
+    const avatarImg = avatarUrl ? `<img src="${avatarUrl}" alt="Аватар" loading="lazy">` : letter;
+    
+    item.innerHTML = `
+      <div class="avatar-ring"><div class="avatar-inner">${avatarImg}</div></div>
+      <div class="person-info">
+        <span class="person-name">${safeNickname}</span>
+        <span class="person-meta">${statusText}</span>
+      </div>
+      <button class="action-btn">Профиль</button>
+    `;
+    
     fragment.appendChild(item);
   });
-  subscriptionsListEl.appendChild(fragment);
+  
+  container.appendChild(fragment);
 }
 
 function applySubscriptionFilters() {
@@ -2986,9 +3020,9 @@ function initProfileSettings() {
   };
 
   const friendsSearchPanel = profileSection?.querySelector('.user-panel__friends.search-panel');
-  const friendSearchInput = document.getElementById('friend-search-input');
-  const friendSearchBtn = document.getElementById('friend-search-btn');
-  const friendSearchResults = document.getElementById('search-results');
+  const friendSearchInput = document.getElementById('people-search-input');
+  const friendSearchBtn = document.getElementById('people-search-btn');
+  const friendSearchResults = document.getElementById('people-search-results');
 
   const resetFriendSearchMessages = () => {
     if (!friendSearchResults) {
@@ -3778,6 +3812,20 @@ function isAnyExistingPinPopupOpen() {
 window.addEventListener('load', function () {
   initAuthWidget();
   parseSharedPinTokenFromUrl();
+
+  // Tabs Logic for People Hub
+  const tabBtns = document.querySelectorAll('.segmented-control .tab-btn');
+  const tabContents = document.querySelectorAll('.people-tab-content');
+  
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      tabBtns.forEach(b => b.classList.remove('is-active'));
+      tabContents.forEach(c => c.classList.remove('is-active'));
+      
+      btn.classList.add('is-active');
+      document.getElementById(`tab-${btn.dataset.tabTarget}`).classList.add('is-active');
+    });
+  });
 
   map = L.map('leaflet-map', {
     zoomControl: true,

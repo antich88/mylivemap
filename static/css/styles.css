@@ -1999,6 +1999,39 @@ button.author-inline.pin-detail-card__author-trigger {
   line-height: 1.3;
 }
 
+/* --- ФИКС ТЕМНОЙ ТЕМЫ ДЛЯ ЭКРАНА ЛЮДИ --- */
+.view-screen--people {
+  background: #0c0f17 !important;
+  margin: 0 !important;
+  min-height: 100vh;
+  padding-top: calc(1.5rem + env(safe-area-inset-top, 0px)) !important;
+}
+
+.view-screen--people .view-screen__title {
+  color: #ffffff !important;
+}
+
+.view-screen--people .view-screen__hint {
+  color: #9aa2c1 !important;
+}
+
+.view-screen--people .person-name {
+  color: #ffffff !important;
+}
+
+.view-screen--people .search-input-wrapper input {
+  color: #ffffff !important;
+}
+
+.view-screen--people .search-input-wrapper input::placeholder {
+  color: rgba(255, 255, 255, 0.4) !important;
+}
+
+.view-screen--people {
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+
 /* Описание метки — приглушенное и читабельное */
 .pin-popup__description {
   display: block;
@@ -4026,6 +4059,82 @@ button.author-inline.pin-detail-card__author-trigger {
   margin-top: 6px !important;
 }
 
+/* --- ПАНЕЛЬ ПРОФИЛЯ АВТОРА (AUTHOR SHEET) --- */
+.author-header {
+  display: flex; flex-direction: column; align-items: center; text-align: center; margin-bottom: 24px; margin-top: 10px;
+}
+.author-avatar-wrapper {
+  width: 86px; height: 86px; border-radius: 50%;
+  background: linear-gradient(135deg, #62c6a8, #5a87ff, #a855f7);
+  padding: 3px; margin-bottom: 12px;
+}
+.author-avatar-inner {
+  width: 100%; height: 100%; border-radius: 50%; background: #1a1d26;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 32px; font-weight: 800; color: #fff; overflow: hidden;
+}
+.author-name {
+  font-size: 22px; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.5px; color: #fff;
+}
+.author-stats-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 24px;
+}
+.author-stats-grid .stat-card {
+  background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 12px 8px; border-radius: 16px; text-align: center;
+}
+.author-stats-grid .stat-value {
+  display: block; font-size: 16px; font-weight: 800; color: #fff; margin-bottom: 2px;
+}
+.author-stats-grid .stat-label {
+  font-size: 10px; color: #9aa2c1; font-weight: 600; text-transform: uppercase;
+}
+.btn-subscribe {
+  width: 100%; background: #5a87ff; color: #fff; border: none; padding: 14px; border-radius: 16px;
+  font-size: 15px; font-weight: 700; margin-bottom: 24px; cursor: pointer;
+  box-shadow: 0 8px 20px rgba(90, 135, 255, 0.25); transition: background 0.2s, transform 0.2s;
+}
+.btn-subscribe.author-panel__subscribe-btn--active {
+  background: rgba(255, 255, 255, 0.08); color: #9aa2c1; box-shadow: none;
+}
+.author-section-title {
+  font-size: 12px; font-weight: 800; color: #9aa2c1; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;
+}
+.pin-item {
+  display: flex; align-items: center; gap: 12px; background: rgba(255, 255, 255, 0.03);
+  padding: 12px; border-radius: 14px; margin-bottom: 8px; border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: transform 0.2s; text-decoration: none;
+}
+.pin-item:active { transform: scale(0.98); }
+.pin-item .pin-icon {
+  width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.pin-item .pin-info { flex: 1; }
+.pin-item .pin-title { display: block; font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+.pin-item .pin-meta { font-size: 11px; color: #9aa2c1; line-height: 1.3; }
+
+/* --- КНОПКА УДАЛЕНИЯ МЕТКИ В ПРОФИЛЕ --- */
+.pin-item__delete-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 77, 79, 0.5);
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.pin-item__delete-btn:hover {
+  background: rgba(255, 77, 79, 0.1);
+  color: #ff4d4f;
+}
+
 /* --- ИНТЕРАКТИВНАЯ СТРОКА КОНТАКТА --- */
 .pin-popup__contact-row {
   display: flex;
@@ -4123,4 +4232,120 @@ button.author-inline.pin-detail-card__author-trigger {
   .create-sheet__header {
     margin-top: 8px;
   }
+}
+/* --- РАЗДЕЛ ЛЮДИ (PEOPLE HUB) --- */
+.people-hub {
+  padding: 0;
+}
+
+.segmented-control {
+  display: flex;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 4px;
+  border-radius: 14px;
+  margin-bottom: 24px;
+  border: 1px solid var(--panel-border);
+}
+
+.tab-btn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 8px 0;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tab-btn.is-active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(90, 135, 255, 0.3);
+}
+
+.people-tab-content {
+  display: none;
+}
+
+.people-tab-content.is-active {
+  display: block;
+}
+
+/* КАРТОЧКА ЧЕЛОВЕКА */
+.person-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 12px;
+  border-radius: 18px;
+  margin-bottom: 10px;
+  transition: transform 0.2s ease;
+  text-decoration: none;
+}
+
+.person-card:active { transform: scale(0.98); }
+
+.avatar-ring {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #62c6a8, #5a87ff);
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.avatar-inner {
+  width: 100%; height: 100%;
+  border-radius: 50%;
+  background: #232325;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; color: #fff; font-size: 18px;
+  overflow: hidden;
+}
+
+.avatar-inner img {
+  width: 100%; height: 100%; object-fit: cover;
+}
+
+.person-info { flex: 1; }
+.person-name { display: block; font-weight: 700; font-size: 15px; margin-bottom: 4px; color: #fff; }
+.person-meta { display: block; font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+
+.action-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.action-btn:hover { background: rgba(255, 255, 255, 0.1); }
+
+/* ПОИСК */
+.search-input-wrapper {
+  position: relative;
+  margin-bottom: 12px;
+}
+.search-input-wrapper input {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 14px 16px 14px 40px;
+  border-radius: 14px;
+  color: #fff;
+  outline: none;
+  font-size: 14px;
+}
+.search-icon {
+  position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+  color: var(--text-muted);
 }
