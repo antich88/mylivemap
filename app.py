@@ -28,6 +28,7 @@ from auth_store import (
     get_or_create_user_profile,
     get_user_by_nickname,
     get_user_subscriptions,
+    get_user_followers_count,
     remove_user_subscription,
     rename_user_profile,
     update_user_avatar_path,
@@ -210,6 +211,10 @@ def create_app() -> Flask:
             base["subscriptions"] = get_user_subscriptions(nickname)
         except Exception:  # pragma: no cover
             base["subscriptions"] = []
+        try:
+            base["followers_count"] = get_user_followers_count(nickname)
+        except Exception:  # pragma: no cover
+            base["followers_count"] = 0
         return base
 
     def _build_author_preview(nickname: str) -> dict:
@@ -276,6 +281,11 @@ def create_app() -> Flask:
                     base["avatar_url"] = serialized.get("avatar_url")
         except Exception as exc:
             app.logger.exception("_build_author_preview failed for %s: %s", nickname, exc)
+
+        try:
+            base["followers_count"] = get_user_followers_count(nickname)
+        except Exception:
+            base["followers_count"] = 0
 
         return base
 
@@ -761,6 +771,7 @@ def create_app() -> Flask:
                         "is_active_recently": user_id in active_authors_set,
                         "age": author.get("age"),
                         "gender": author.get("gender"),
+                        "followers_count": author.get("followers_count", 0),
                     }
                 else:
                     payload["author"] = None

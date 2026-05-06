@@ -707,3 +707,26 @@ def update_user_nickname(current_nickname: str, next_nickname: str) -> AuthUser:
         password_hash=str(row["password_hash"]),
         created_at=row["created_at"],
     )
+
+
+def get_user_followers_count(nickname: str) -> int:
+    normalized = _normalize_nickname(nickname)
+    if not normalized:
+        return 0
+
+    if LOCAL_MODE:
+        if not _LOCAL_PROFILES_STORE:
+            return 0
+        count = 0
+        snapshot = _LOCAL_PROFILES_STORE.snapshot()
+        for entry in snapshot.get("profiles", []):
+            if normalized in entry.get("subscriptions", []):
+                count += 1
+        return count
+
+    from sqlalchemy import select, func
+    with session_scope() as session:
+        stmt = select(func.count()).where(
+            user_subscriptions_table.c.author_nickname == normalized
+        )
+        return session.execute(stmt).scalar() or 0
