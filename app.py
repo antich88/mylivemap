@@ -311,6 +311,12 @@ def create_app() -> Flask:
                 overwrite=True,
                 use_filename=False,
                 unique_filename=False,
+                # Умная оптимизация и ограничение размера
+                width=1080,
+                height=1080,
+                crop="limit",
+                format="auto",
+                quality="auto"
             )
             secure_url = str(upload_result.get("secure_url") or "").strip()
             print(f"DEBUG CLOUDINARY SUCCESS: {secure_url}")

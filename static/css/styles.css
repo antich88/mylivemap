@@ -3691,9 +3691,44 @@ button.author-inline.pin-detail-card__author-trigger {
 }
 
 .filter-cat-card__icon {
-  font-size: 22px !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1 !important;
+}
+
+.filter-cat-card__icon svg {
+  width: 26px;
+  height: 26px;
+  stroke-width: 2px;
+  color: var(--chip-color);
+  opacity: 0.5;
+  transition: all 0.3s ease;
+}
+
+.filter-cat-card.is-active .filter-cat-card__icon svg,
+.filter-cat-card[aria-pressed="true"] .filter-cat-card__icon svg {
   color: #ffffff !important;
+  opacity: 1;
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.7));
+}
+
+/* --- ЛОГИКА NEON GLOW ДЛЯ SVG ИКОНОК --- */
+
+.create-dropdown__icon,
+.create-dropdown__option-icon {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: transparent !important;
+}
+
+.create-dropdown__icon svg,
+.create-dropdown__option-icon svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 2px;
+  color: currentColor;
 }
 
 .filter-cat-card__label {

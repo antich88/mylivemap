@@ -101,7 +101,7 @@ CATEGORY_DEFINITIONS: List[Dict[str, object]] = [
         "slug": "community",
         "label": "Знакомства",
         "color": "#9B59B6",
-        "icon": "💬",
+        "icon": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>',
         "subcategories": [
             {"slug": "community.chat", "label": "Чат", "ttl": BASE_TTL_SECONDS["community.chat"]},
             {"slug": "community.coffee", "label": "Кофе", "ttl": BASE_TTL_SECONDS["community.coffee"]},
@@ -112,7 +112,7 @@ CATEGORY_DEFINITIONS: List[Dict[str, object]] = [
         "slug": "sport",
         "label": "Спорт",
         "color": "#2ECC71",
-        "icon": "⚽",
+        "icon": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>',
         "subcategories": [
             {"slug": "sport.table_tennis", "label": "Настольный теннис", "ttl": BASE_TTL_SECONDS["sport.table_tennis"]},
             {"slug": "sport.badminton", "label": "Бадминтон", "ttl": BASE_TTL_SECONDS["sport.badminton"]},
@@ -123,7 +123,7 @@ CATEGORY_DEFINITIONS: List[Dict[str, object]] = [
         "slug": "food_drink",
         "label": "Бары",
         "color": "#FF4500",
-        "icon": "🍺",
+        "icon": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"></path><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"></path><line x1="6" y1="1" x2="6" y2="4"></line><line x1="10" y1="1" x2="10" y2="4"></line><line x1="14" y1="1" x2="14" y2="4"></line></svg>',
         "subcategories": [
             {"slug": "food_drink.cafe", "label": "Кафе/Рестораны", "ttl": BASE_TTL_SECONDS["food_drink.cafe"]},
             {"slug": "food_drink.bar", "label": "Бары/Клубы", "ttl": BASE_TTL_SECONDS["food_drink.bar"]},
@@ -133,7 +133,7 @@ CATEGORY_DEFINITIONS: List[Dict[str, object]] = [
         "slug": "landmarks",
         "label": "Места",
         "color": "#006400",
-        "icon": "🏰",
+        "icon": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>',
         "subcategories": [
             {
                 "slug": "landmarks.architecture",
@@ -156,7 +156,7 @@ CATEGORY_DEFINITIONS: List[Dict[str, object]] = [
         "slug": "museums",
         "label": "Выставки",
         "color": "#CD7F32",
-        "icon": "🏛️",
+        "icon": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="20" width="20" height="2"></rect><rect x="2" y="2" width="20" height="4"></rect><path d="M6 6v14"></path><path d="M10 6v14"></path><path d="M14 6v14"></path><path d="M18 6v14"></path></svg>',
         "subcategories": [
             {"slug": "museums.classic", "label": "Классика", "ttl": BASE_TTL_SECONDS["museums.classic"]},
             {"slug": "museums.modern", "label": "Модерн", "ttl": BASE_TTL_SECONDS["museums.modern"]},
@@ -166,7 +166,7 @@ CATEGORY_DEFINITIONS: List[Dict[str, object]] = [
         "slug": "fishing",
         "label": "Рыбалка",
         "color": "#3498DB",
-        "icon": "🎣",
+        "icon": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12l-6-6c-4 0-8 3-10 6 2 3 6 6 10 6l6-6z"></path><polygon points="6 12 2 8 2 16 6 12"></polygon><circle cx="16" cy="11" r="1"></circle></svg>',
         "subcategories": [
             {"slug": "fishing.spinning", "label": "Спиннинг", "ttl": BASE_TTL_SECONDS["fishing.spinning"]},
             {"slug": "fishing.feeder", "label": "Фидер", "ttl": BASE_TTL_SECONDS["fishing.feeder"]},
@@ -178,7 +178,7 @@ CATEGORY_DEFINITIONS: List[Dict[str, object]] = [
         "slug": "moto",
         "label": "Мото",
         "color": "#8B0000",
-        "icon": "🏍️",
+        "icon": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="17.5" r="3.5"></circle><circle cx="18.5" cy="17.5" r="3.5"></circle><path d="M15 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm-3 11.5V14l-3-3 4-3 2 3h2"></path></svg>',
         "subcategories": [
             {"slug": "moto.urgent", "label": "ДТП / Срочная помощь", "ttl": BASE_TTL_SECONDS["moto.urgent"]},
             {"slug": "moto.ride", "label": "Покатушки / Сбор", "ttl": BASE_TTL_SECONDS["moto.ride"]},

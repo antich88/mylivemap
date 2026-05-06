@@ -297,8 +297,8 @@ function populateCategoryDropdownPanel() {
     const iconSpan = document.createElement('span');
     iconSpan.className = 'create-dropdown__option-icon';
     iconSpan.setAttribute('aria-hidden', 'true');
-    iconSpan.textContent = category.icon || '';
-    iconSpan.style.backgroundColor = category.color || 'transparent';
+    iconSpan.innerHTML = category.icon || '';
+    iconSpan.style.color = category.color || 'inherit';
 
     const labelSpan = document.createElement('span');
     labelSpan.className = 'create-dropdown__option-label';
@@ -326,10 +326,10 @@ function setSelectedCategory(slug) {
     labelEl.textContent = category.label || category.name || '';
   }
   const iconEl = document.getElementById('create-category-icon');
-  if (iconEl) {
-    iconEl.textContent = category.icon || '';
-    iconEl.style.backgroundColor = category.color || 'transparent';
-  }
+    if (iconEl) {
+      iconEl.innerHTML = category.icon || '';
+      iconEl.style.color = category.color || 'inherit';
+    }
 
   document.querySelectorAll('.create-dropdown__option').forEach((opt) => {
     if (opt.dataset.slug === slug) {

@@ -62,7 +62,7 @@
                 data-icon="{{ group.icon }}"
                 aria-pressed="false"
               >
-                <span class="category-chip__icon filter-cat-card__icon">{{ group.icon }}</span>
+                <span class="category-chip__icon filter-cat-card__icon">{{ group.icon | safe }}</span>
                 <span class="category-chip__label filter-cat-card__label">{{ group.label }}</span>
                 <span class="category-count filter-cat-card__count">0</span>
               </button>
@@ -74,7 +74,7 @@
               data-subscribe-chip
               style="--chip-color: #BDD8E9;"
             >
-              <span class="category-chip__icon subscribe-btn__icon filter-cat-card__icon" aria-hidden="true">👤</span>
+              <span class="category-chip__icon subscribe-btn__icon filter-cat-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span>
               <span class="category-chip__label subscribe-btn__label filter-cat-card__label">Подписки</span>
               <span class="category-count subscribe-btn__count filter-cat-card__count" aria-hidden="true">0</span>
             </button>
@@ -466,11 +466,11 @@
       <!-- Категория (dropdown) -->
       <div class="create-field">
         <label class="create-field__label">Категория</label>
-        <button type="button" class="create-dropdown__trigger" id="create-category-trigger" aria-haspopup="listbox" aria-expanded="false">
-          <span class="create-dropdown__selected">
-            <span class="create-dropdown__icon" id="create-category-icon">💬</span>
-            <span class="create-dropdown__label" id="create-category-label">Общение</span>
-          </span>
+            <button type="button" class="create-dropdown__trigger" id="create-category-trigger" aria-haspopup="listbox" aria-expanded="false">
+              <span class="create-dropdown__selected">
+                <span class="create-dropdown__icon" id="create-category-icon"></span>
+                <span class="create-dropdown__label" id="create-category-label">Общение</span>
+              </span>
           <span class="create-dropdown__chevron" aria-hidden="true">▾</span>
         </button>
         <div class="create-dropdown__panel" id="create-category-panel" hidden role="listbox">
