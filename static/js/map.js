@@ -1694,14 +1694,12 @@ function createPopupContent(pin) {
         ${voteRowMarkup}
       </header>
 
-      <div class="pin-detail-card__title">${escapeHtml(pin.nickname || pin.title || 'Метка')}</div>
-      <div class="pin-detail-card__description">
-        <p>${escapeHtml(pin.description || 'Описание отсутствует.')}</p>
-      </div>
+      <b class="pin-popup__title">${escapeHtml(pin.nickname || pin.title || 'Метка')}</b>
+      <span class="pin-popup__description">${escapeHtml(pin.description || 'Описание отсутствует.')}</span>
 
       <section class="pin-detail-card__discussion pin-comments" data-pin-id="${pin.id}">
         <div class="pin-comments__header">
-          <span>💬 Обсуждение</span>
+          <span>Обсуждение</span>
           <span class="pin-detail-card__message-count">${commentCount}</span>
         </div>
         ${commentsList}
@@ -3533,6 +3531,21 @@ function handleCreateSheetSubmit(event) {
       return response.json();
     })
     .then((pin) => {
+      // Подставляем данные текущего пользователя, если сервер их не вернул
+      if (!pin.author) {
+        pin.author = {};
+      }
+      if (!pin.author.avatar_url && currentAuthUser && currentAuthUser.avatar_url) {
+        pin.author.avatar_url = currentAuthUser.avatar_url;
+        pin.avatar_url = currentAuthUser.avatar_url;
+      }
+      if (!pin.author.nickname && currentAuthUser && currentAuthUser.nickname) {
+        pin.author.nickname = currentAuthUser.nickname;
+      }
+      if (!pin.author.reputation_level && currentAuthUser && currentAuthUser.reputation_level) {
+        pin.author.reputation_level = currentAuthUser.reputation_level;
+      }
+      
       addPinToMap(pin);
       closeCreateSheet();
       fetchPins();
