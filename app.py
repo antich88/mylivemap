@@ -311,9 +311,10 @@ def create_app() -> Flask:
                 overwrite=True,
                 use_filename=False,
                 unique_filename=False,
-                # Умная оптимизация и ограничение размера
-                width=1080,
-                height=1080,
+                # Сохраняем оригинальное разрешение до 3000px,
+                # но радикально снижаем вес за счет умных форматов
+                width=3000,
+                height=3000,
                 crop="limit",
                 format="auto",
                 quality="auto"
@@ -325,7 +326,7 @@ def create_app() -> Flask:
             print("DEBUG CLOUDINARY WARNING: secure_url отсутствует, отклоняем запись")
             return None
         except Exception as exc:  # pragma: no cover
-            print(f"DEBUG CLOUDINARY ERROR: {exc}")
+            print(f"DEBUG: Cloudinary Error: {exc}")
             app.logger.warning("Cloudinary upload failed for %s: %s", unique_name, exc)
             return None
 

@@ -49,7 +49,7 @@ UPLOADS_DIR = STATIC_DIR / "uploads"
 AVATAR_UPLOAD_DIR = UPLOADS_DIR / "avatars"
 AVATAR_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-MAX_AVATAR_FILE_SIZE = int(os.environ.get("MAX_AVATAR_FILE_SIZE", 1_048_576))
+MAX_AVATAR_FILE_SIZE = int(os.environ.get("MAX_AVATAR_FILE_SIZE", 10 * 1024 * 1024))
 ALLOWED_AVATAR_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 CLOUDINARY_FORCE_UPLOADS = _parse_bool_env(os.getenv("CLOUDINARY_FORCE_UPLOADS"))
 _raw_cloudinary_url = (os.getenv("CLOUDINARY_URL") or "").strip()
