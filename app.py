@@ -316,7 +316,7 @@ def create_app() -> Flask:
                 width=3000,
                 height=3000,
                 crop="limit",
-                format="auto",
+                format="webp",
                 quality="auto"
             )
             secure_url = str(upload_result.get("secure_url") or "").strip()
