@@ -4025,3 +4025,102 @@ button.author-inline.pin-detail-card__author-trigger {
   line-height: 1.4 !important;
   margin-top: 6px !important;
 }
+
+/* --- ИНТЕРАКТИВНАЯ СТРОКА КОНТАКТА --- */
+.pin-popup__contact-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 10px 14px;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-bottom: 16px; /* Воздух до секции обсуждения */
+  text-decoration: none;
+}
+
+.pin-popup__contact-row:active {
+  transform: scale(0.98);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.pin-popup__contact-row .contact-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pin-popup__contact-row svg {
+  color: #5a87ff;
+}
+
+.pin-popup__contact-row .contact-label {
+  font-size: 11px;
+  color: #9aa2c1;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  line-height: 1.2;
+}
+
+.pin-popup__contact-row .contact-value {
+  font-size: 14px;
+  color: #ffffff;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+/* --- АДАПТИВ ПАНЕЛИ КАТЕГОРИЙ (Планшеты и ПК) --- */
+@media (min-width: 768px) {
+  .filter-sheet {
+    max-width: 680px; /* Ограничиваем максимальную ширину */
+    margin: 0 auto; /* Центрируем панель на широком экране */
+    border-radius: 0 0 24px 24px;
+    padding-bottom: 30px; /* Чуть меньше отступ снизу, так как нет мобильного свайпа */
+  }
+
+  .filter-cat-card {
+    aspect-ratio: 4 / 3 !important; /* Делаем кнопки прямоугольными, чтобы они не съедали высоту экрана */
+    padding: 12px 8px !important;
+  }
+
+  .filter-cat-card__icon svg {
+    width: 24px !important;
+    height: 24px !important;
+  }
+}
+
+@media (min-width: 768px) and (max-height: 650px) {
+  /* Специфичный фикс для очень низких экранов, типа Nest Hub */
+  .filter-cat-card {
+    aspect-ratio: 16 / 9 !important; /* Еще более плоские кнопки */
+  }
+  .filter-sheet__header {
+    margin-bottom: 12px;
+  }
+  .filter-sheet__actions {
+    margin-bottom: 12px;
+  }
+}
+
+/* --- АДАПТИВ ОКОН МЕТОК (Планшеты и ПК) --- */
+@media (min-width: 768px) {
+  .create-sheet {
+    max-width: 420px; /* Компактная ширина, имитирующая экран телефона */
+    margin: 0 auto;   /* Центрируем панель по горизонтали */
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  /* На десктопе полоска для свайпа (drag handle) не нужна, закрываем крестиком */
+  .create-sheet__drag-handle {
+    display: none;
+  }
+
+  /* Компенсируем отступ сверху, так как убрали полоску для свайпа */
+  .create-sheet__header {
+    margin-top: 8px;
+  }
+}
