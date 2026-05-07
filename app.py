@@ -65,6 +65,7 @@ from database import (
     pins_table,
     profiles_table,
     session_scope,
+    users_table,
 )
 from models import (
     active_pins,
@@ -1128,6 +1129,15 @@ def create_app() -> Flask:
     @app.route("/favicon.ico")
     def favicon() -> redirect:
         return redirect(url_for("static", filename="img/favicon.ico"))
+
+    @app.route("/admin/fix-db-nicknames-secret-99")
+    def fix_db_nicknames() -> tuple[str, int]:
+        from sqlalchemy import func, update
+
+        with session_scope() as session:
+            session.execute(update(users_table).values(nickname=func.lower(users_table.c.nickname)))
+            session.execute(update(profiles_table).values(nickname=func.lower(profiles_table.c.nickname)))
+        return "База данных успешно переведена в нижний регистр!", 200
 
     @app.route("/health")
     def healthcheck() -> tuple[dict, int]:

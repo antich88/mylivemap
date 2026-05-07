@@ -173,12 +173,13 @@ def add_user_subscription(user_nickname: str, author_nickname: str) -> None:
         try:
             stmt = (
                 insert(user_subscriptions_table)
-                .values(user_id=user_norm, author_nickname=author_norm, created_at=now)
+                .values(follower_id=user_norm, author_id=author_norm, created_at=now)
                 .execution_options(synchronize_session=False)
             )
             session.execute(stmt)
         except Exception:
             session.rollback()
+            raise
 
 
 def remove_user_subscription(user_nickname: str, author_nickname: str) -> None:
@@ -200,8 +201,8 @@ def remove_user_subscription(user_nickname: str, author_nickname: str) -> None:
     with session_scope() as session:
         stmt = (
             delete(user_subscriptions_table)
-            .where(user_subscriptions_table.c.user_id == user_norm)
-            .where(user_subscriptions_table.c.author_nickname == author_norm)
+            .where(user_subscriptions_table.c.follower_id == user_norm)
+            .where(user_subscriptions_table.c.author_id == author_norm)
         )
         session.execute(stmt)
 
@@ -728,6 +729,6 @@ def get_user_followers_count(nickname: str) -> int:
     from sqlalchemy import select, func
     with session_scope() as session:
         stmt = select(func.count()).where(
-            user_subscriptions_table.c.author_nickname == normalized
+            user_subscriptions_table.c.author_id == normalized
         )
         return session.execute(stmt).scalar() or 0
