@@ -37,8 +37,38 @@ class LocalPinStore:
         tmp_path.replace(self.storage_path)
 
 
+class LocalMessageStore:
+    def __init__(self, storage_path: Path):
+        self.storage_path = storage_path
+        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+        self.ensure_storage()
+
+    def ensure_storage(self) -> None:
+        if not self.storage_path.exists():
+            self.storage_path.write_text(
+                json.dumps({"messages": [], "last_id": 0}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+    def snapshot(self) -> dict:
+        self.ensure_storage()
+        try:
+            return json.loads(self.storage_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return {"messages": [], "last_id": 0}
+
+    def persist(self, payload: dict) -> None:
+        tmp_path = self.storage_path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(self.storage_path)
+
+
+_LOCAL_MESSAGES_STORE: LocalMessageStore | None = None
+
+
 if LOCAL_MODE:
     _LOCAL_STORE = LocalPinStore(LOCAL_PINS_PATH)
+    _LOCAL_MESSAGES_STORE = LocalMessageStore(Path("data/local_messages.json"))
 
 
     def init_schema() -> None:
@@ -61,6 +91,7 @@ if LOCAL_MODE:
     votes_table = None  # type: ignore
     friendships_table = None  # type: ignore
     user_subscriptions_table = None  # type: ignore
+    messages_table = None  # type: ignore
 
 else:
     from sqlalchemy import (
@@ -205,6 +236,17 @@ else:
         UniqueConstraint("follower_id", "author_id", name="uq_user_subscriptions_follower_author"),
     )
 
+    messages_table = Table(
+        "messages",
+        metadata,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("sender_id", String(255), nullable=False),
+        Column("receiver_id", String(255), nullable=False),
+        Column("content", String, nullable=False),
+        Column("created_at", DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)),
+        Column("is_read", Integer, nullable=False, server_default=text("0"), default=0),
+    )
+
 
     def init_schema() -> None:
         metadata.create_all(ENGINE)
@@ -247,6 +289,10 @@ else:
         if not inspector.has_table("user_subscriptions"):
             with ENGINE.begin() as conn:
                 user_subscriptions_table.create(conn)
+
+        if not inspector.has_table("messages"):
+            with ENGINE.begin() as conn:
+                messages_table.create(conn)
 
         # pins: ensure image_url
         if "pins" in table_names:

@@ -59,9 +59,11 @@ from config import (
 )
 from database import (
     LOCAL_MODE,
+    _LOCAL_MESSAGES_STORE,
     active_authors_recently,
     ensure_connection,
     init_schema,
+    messages_table,
     pins_table,
     profiles_table,
     session_scope,
@@ -965,11 +967,155 @@ def create_app() -> Flask:
             abort(401, description="Нужно войти в аккаунт.")
         return user
 
+    def _resolve_session_user_nickname() -> str | None:
+        user_payload = session.get("user")
+        nickname = None
+        if isinstance(user_payload, str):
+            nickname = user_payload
+        elif isinstance(user_payload, dict):
+            nickname = user_payload.get("nickname")
+        if not nickname:
+            nickname = session.get("user_nickname")
+        if nickname:
+            return str(nickname).strip()
+        return None
+
+    def _require_session_user_nickname() -> str:
+        nickname = _resolve_session_user_nickname()
+        if not nickname:
+            abort(401, description="Нужно войти в аккаунт.")
+        return nickname
+
+    def _serialize_message_row(row: dict) -> dict:
+        created_at = row.get("created_at")
+        if isinstance(created_at, datetime):
+            created_at = created_at.isoformat()
+        return {
+            "id": row.get("id"),
+            "sender": row.get("sender_id"),
+            "receiver": row.get("receiver_id"),
+            "content": row.get("content"),
+            "created_at": created_at,
+            "is_read": bool(row.get("is_read")),
+        }
+
     def _pin_or_404(pin_id: int):
         pin = next((p for p in active_pins() if p.id == pin_id), None)
         if not pin:
             abort(404)
         return pin
+
+    @app.route("/api/messages/<path:target_nickname>", methods=["GET"])
+    def fetch_messages(target_nickname: str) -> tuple[dict, int]:
+        user = session.get("user")
+        if not user:
+            return {"error": "Unauthorized"}, 401
+        current_nickname = str(user.get("nickname") or "").strip().lower()
+        target = (target_nickname or "").strip().lower()
+        if not target:
+            return {"messages": []}, 200
+        if LOCAL_MODE:
+            store = _LOCAL_MESSAGES_STORE
+            if not store:
+                return {"messages": []}, 200
+            data = store.snapshot()
+            normalized = []
+            for message in data.get("messages", []):
+                sender_id = str(message.get("sender_id") or "").lower()
+                receiver_id = str(message.get("receiver_id") or "").lower()
+                if (
+                    sender_id == current_nickname and receiver_id == target
+                ) or (
+                    sender_id == target and receiver_id == current_nickname
+                ):
+                    normalized.append(message)
+            return {"messages": normalized}, 200
+
+        from sqlalchemy import asc, and_, or_, select
+
+        stmt = (
+            select(
+                messages_table.c.id,
+                messages_table.c.sender_id,
+                messages_table.c.receiver_id,
+                messages_table.c.content,
+                messages_table.c.created_at,
+                messages_table.c.is_read,
+            )
+            .where(
+                or_(
+                    and_(
+                        messages_table.c.sender_id == current_nickname,
+                        messages_table.c.receiver_id == target,
+                    ),
+                    and_(
+                        messages_table.c.sender_id == target,
+                        messages_table.c.receiver_id == current_nickname,
+                    ),
+                )
+            )
+            .order_by(asc(messages_table.c.created_at))
+        )
+        with session_scope() as db_session:
+            rows = db_session.execute(stmt).mappings().all()
+        messages = [_serialize_message_row(dict(row)) for row in rows]
+        return {"messages": messages}, 200
+
+    @app.route("/api/messages/send", methods=["POST"])
+    def send_message() -> tuple[dict, int]:
+        user = session.get("user")
+        if not user:
+            return {"error": "Unauthorized"}, 401
+        current_nickname = str(user.get("nickname") or "").strip().lower()
+        payload = request.get_json(silent=True) or {}
+        receiver = str(payload.get("receiver") or "").strip().lower()
+        content = str(payload.get("content") or "").strip()
+        if not receiver or not content:
+            return {"error": "Invalid data"}, 400
+
+        if LOCAL_MODE:
+            store = _LOCAL_MESSAGES_STORE
+            if not store:
+                return {"error": "Storage unavailable"}, 500
+            store_data = store.snapshot()
+            new_id = int(store_data.get("last_id", 0)) + 1
+            new_msg = {
+                "id": new_id,
+                "sender_id": current_nickname,
+                "receiver_id": receiver,
+                "content": content,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "is_read": 0,
+            }
+            store_data.setdefault("messages", []).append(new_msg)
+            store_data["last_id"] = new_id
+            store.persist(store_data)
+            return new_msg, 200
+
+        from sqlalchemy import insert
+
+        timestamp = datetime.now(timezone.utc)
+        insert_stmt = (
+            insert(messages_table)
+            .values(
+                sender_id=current_nickname,
+                receiver_id=receiver,
+                content=content,
+                created_at=timestamp,
+                is_read=0,
+            )
+            .returning(
+                messages_table.c.id,
+                messages_table.c.sender_id,
+                messages_table.c.receiver_id,
+                messages_table.c.content,
+                messages_table.c.created_at,
+                messages_table.c.is_read,
+            )
+        )
+        with session_scope() as db_session:
+            row = db_session.execute(insert_stmt).mappings().one()
+        return {"message": _serialize_message_row(dict(row))}, 200
 
     @app.route("/add_comment", methods=["POST"])
     def add_comment_route():

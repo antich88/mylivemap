@@ -60,6 +60,7 @@ function getPinNoun(count) {
 let subscriptionsFilterActive = false;
 const subscribedAuthorNicknames = new Set();
 let updateSubscribeButtonState = () => {};
+let currentChatInterlocutor = null;
 
 function clearCategorySelections() {
   activeCategorySlugs.clear();
@@ -1283,9 +1284,17 @@ function refreshAuthorPanelSubscribeButtonState() {
     return;
   }
   const subscribed = isNicknameSubscribed(authorPanelCurrentNickname);
-  subscribeBtn.textContent = subscribed ? 'Отписаться' : 'Подписаться';
-  subscribeBtn.classList.toggle('author-panel__subscribe-btn--active', subscribed);
+
+  subscribeBtn.classList.toggle('is-following', subscribed);
   subscribeBtn.dataset.authorSubscribed = subscribed ? 'true' : 'false';
+
+  if (subscribed) {
+    subscribeBtn.innerHTML = '<span>Вы подписаны</span>';
+    subscribeBtn.dataset.textUnsub = 'Отписаться';
+  } else {
+    subscribeBtn.innerHTML = 'Подписаться';
+    subscribeBtn.removeAttribute('data-text-unsub');
+  }
 }
 
 function toggleAuthorPanelSubscription() {
@@ -1353,6 +1362,172 @@ function bindAuthorPanelSubscribeButton(author) {
   authorSubscribeBtn.__authorSubscribeHandler = handleSubscribeClick;
   authorSubscribeBtn.addEventListener('click', handleSubscribeClick);
   refreshAuthorPanelSubscribeButtonState();
+
+  const writeBtn = container ? container.querySelector('.author-panel__write-btn') : null;
+  if (writeBtn) {
+    const handleWriteClick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!authorPanelCurrentNickname) {
+        showUserToast('Не удалось определить никнейм автора.');
+        return;
+      }
+      openChatWith(authorPanelCurrentNickname);
+    };
+    if (writeBtn.__authorWriteHandler) {
+      writeBtn.removeEventListener('click', writeBtn.__authorWriteHandler);
+    }
+    writeBtn.__authorWriteHandler = handleWriteClick;
+    writeBtn.addEventListener('click', handleWriteClick);
+  }
+}
+
+function getAuthorSheetScreenElement() {
+  return (
+    document.getElementById('author-sheet-screen') ||
+    document.querySelector('.view-screen--author-sheet') ||
+    document.getElementById('author-sheet') ||
+    null
+  );
+}
+
+function getChatMessagesContainer() {
+  return document.getElementById('chat-messages-container');
+}
+
+function scrollChatMessagesToBottom(container) {
+  if (!container) {
+    return;
+  }
+  container.scrollTop = container.scrollHeight;
+}
+
+function appendChatMessageToContainer(container, message, isOutgoing) {
+  if (!container || !message) {
+    return;
+  }
+  const wrapper = document.createElement('div');
+  wrapper.className = `message ${isOutgoing ? 'outgoing' : 'incoming'}`;
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = message.content || '';
+  wrapper.appendChild(bubble);
+  container.appendChild(wrapper);
+}
+
+function loadChatHistory(nickname) {
+  if (!nickname) {
+    return;
+  }
+  const container = getChatMessagesContainer();
+  if (!container) {
+    return;
+  }
+  container.innerHTML = '';
+  fetch(`/api/messages/${encodeURIComponent(nickname)}`, {
+    credentials: 'same-origin',
+  })
+    .then(handleJsonResponse)
+    .then((data) => {
+      const messages = Array.isArray(data?.messages) ? data.messages : [];
+      const normalizedCurrent = normalizeNicknameForComparison(currentAuthUser?.nickname);
+      messages.forEach((message) => {
+        const sender = normalizeNicknameForComparison(message?.sender);
+        const isOutgoing = Boolean(normalizedCurrent && sender && normalizedCurrent === sender);
+        appendChatMessageToContainer(container, message, isOutgoing);
+      });
+      scrollChatMessagesToBottom(container);
+    })
+    .catch((error) => {
+      showUserToast(error.message || 'Не удалось загрузить историю чата.');
+    });
+}
+
+function openChatWith(nickname) {
+  const resolved = (nickname || '').trim();
+  if (!resolved) {
+    return;
+  }
+  currentChatInterlocutor = resolved;
+  const nameLabel = document.getElementById('chat-interlocutor-name');
+  if (nameLabel) {
+    nameLabel.textContent = resolved;
+  }
+  const authorScreen = getAuthorSheetScreenElement();
+  authorScreen?.classList.remove('view-screen--active');
+  const chatScreen = document.getElementById('chat-window-screen');
+  chatScreen?.classList.add('view-screen--active');
+  const overlayStack = document.querySelector('.view-overlay-stack');
+  overlayStack?.classList.add('view-overlay-stack--visible');
+  const container = getChatMessagesContainer();
+  if (container) {
+    container.innerHTML = '';
+  }
+  loadChatHistory(resolved);
+  const input = document.getElementById('chat-message-input');
+  input?.focus();
+}
+
+function closeChatWindow() {
+  const chatScreen = document.getElementById('chat-window-screen');
+  chatScreen?.classList.remove('view-screen--active');
+  const authorScreen = getAuthorSheetScreenElement();
+  authorScreen?.classList.add('view-screen--active');
+  const container = getChatMessagesContainer();
+  if (container) {
+    container.innerHTML = '';
+  }
+  currentChatInterlocutor = null;
+  const input = document.getElementById('chat-message-input');
+  if (input) {
+    input.value = '';
+  }
+  const overlayStack = document.querySelector('.view-overlay-stack');
+  overlayStack?.classList.remove('view-overlay-stack--visible');
+}
+
+function sendChatMessage() {
+  const receiver = (currentChatInterlocutor || '').trim();
+  if (!receiver) {
+    showUserToast('Выберите собеседника.');
+    return;
+  }
+  const input = document.getElementById('chat-message-input');
+  const text = (input?.value || '').trim();
+  if (!text) {
+    return;
+  }
+  const sendButton = document.getElementById('chat-send-btn');
+  if (sendButton) {
+    sendButton.disabled = true;
+  }
+  fetch('/api/messages/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ receiver, content: text }),
+  })
+    .then(handleJsonResponse)
+    .then((data) => {
+      const message = data?.message;
+      const container = getChatMessagesContainer();
+      if (message && container) {
+        appendChatMessageToContainer(container, message, true);
+        scrollChatMessagesToBottom(container);
+      }
+      if (input) {
+        input.value = '';
+      }
+    })
+    .catch((error) => {
+      showUserToast(error.message || 'Не удалось отправить сообщение.');
+    })
+    .finally(() => {
+      if (sendButton) {
+        sendButton.disabled = false;
+      }
+      input?.focus();
+    });
 }
 
 let isAuthorSheetClosing = false;
@@ -1501,18 +1676,42 @@ function centerMapUnderSheet(latlng, sheet) {
 }
 
 function renderAuthorProfileContent(author) {
-  const nickname = escapeHtml(author.nickname || 'Автор');
+  const rawNickname = author.nickname || 'Автор';
+  const nickname = escapeHtml(rawNickname);
   const avatarUrl = author.avatar_url ? escapeHtml(author.avatar_url) : '';
   const letter = nickname.charAt(0).toUpperCase() || 'A';
+  const resolvedAuthorNickname = (author.nickname || author.user_id || '').trim();
+  const currentNicknameNormalized = (currentAuthUser?.nickname || '').trim().toLowerCase();
+  const normalizedAuthorNickname = resolvedAuthorNickname.toLowerCase();
+  const isSelfProfile = Boolean(normalizedAuthorNickname && currentNicknameNormalized && normalizedAuthorNickname === currentNicknameNormalized);
   const rating = formatAuthorRating(author.rating_total);
   const followers = author.followers_count || 0;
   const badgeMarkup = renderReputationBadge(author);
   const age = formatAuthorAge(author.age);
   const gender = formatAuthorGender(author.gender);
+  const isSubscribed = Boolean(resolvedAuthorNickname && isNicknameSubscribed(resolvedAuthorNickname));
 
   const avatarMarkup = avatarUrl
     ? `<img src="${avatarUrl}" alt="Аватар" style="width:100%; height:100%; border-radius:50%; object-fit:cover;" loading="lazy">`
     : letter;
+
+  const subscribeButtonMarkup = isSubscribed
+    ? `<button type="button" class="subscribe-btn is-following author-panel__subscribe-btn" data-text-unsub="Отписаться"><span>Вы подписаны</span></button>`
+    : `<button type="button" class="subscribe-btn author-panel__subscribe-btn">Подписаться</button>`;
+
+  const actionsMarkup = isSelfProfile
+    ? ''
+    : `
+        <div class="author-panel__actions">
+          ${subscribeButtonMarkup}
+          <button type="button" class="action-btn author-panel__write-btn">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+            Написать
+          </button>
+        </div>
+    `;
 
   return `
     <div class="author-header">
@@ -1541,7 +1740,7 @@ function renderAuthorProfileContent(author) {
       </div>
     </div>
 
-    <button class="btn-subscribe author-panel__subscribe-btn">Подписаться</button>
+    ${actionsMarkup}
 
     <div class="author-section-title">Активные метки</div>
     <div class="author-pins-list" data-author-active-pins-list>
@@ -3951,6 +4150,26 @@ window.addEventListener('load', function () {
       btn.classList.add('is-active');
       document.getElementById(`tab-${btn.dataset.tabTarget}`).classList.add('is-active');
     });
+  });
+
+  const chatBackBtn = document.getElementById('chat-back-btn');
+  chatBackBtn?.addEventListener('click', (event) => {
+    event.preventDefault();
+    closeChatWindow();
+  });
+
+  const chatSendBtn = document.getElementById('chat-send-btn');
+  chatSendBtn?.addEventListener('click', (event) => {
+    event.preventDefault();
+    sendChatMessage();
+  });
+
+  const chatInput = document.getElementById('chat-message-input');
+  chatInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      sendChatMessage();
+    }
   });
 
   map = L.map('leaflet-map', {

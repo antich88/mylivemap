@@ -972,8 +972,24 @@ html {
   overflow-y: visible;
 }
 
+.view-screen--chat-window {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--background);
+  z-index: 100;
+  display: none;
+}
+
 .view-screen--active {
   display: block;
+}
+
+.view-screen--chat-window.view-screen--active {
+  display: flex !important;
+  flex-direction: column;
 }
 
 .view-screen__content {
@@ -982,6 +998,97 @@ html {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.chat-header {
+  padding: 15px 20px;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  border-bottom: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.chat-user-info .user-name {
+  color: #fff;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.chat-messages {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.message {
+  max-width: 85%;
+  display: flex;
+  flex-direction: column;
+}
+
+.message.incoming {
+  align-self: flex-start;
+}
+
+.message.outgoing {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.bubble {
+  padding: 12px 16px;
+  border-radius: 16px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.incoming .bubble {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-main);
+  border-bottom-left-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.outgoing .bubble {
+  background: var(--accent);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+  box-shadow: 0 4px 12px rgba(90, 135, 255, 0.2);
+}
+
+.chat-input-area {
+  padding: 15px;
+  display: flex;
+  gap: 10px;
+  border-top: 1px solid var(--panel-border);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.chat-input-area input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 12px 15px;
+  color: #fff;
+  outline: none;
+}
+
+.send-btn {
+  background: var(--accent);
+  border: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 
 .view-screen__title {
@@ -1739,6 +1846,116 @@ html {
   height: 45px;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.04);
+}
+
+.author-panel__actions {
+  display: flex !important;
+  gap: 12px;
+  margin-top: 20px;
+  width: 100%;
+}
+
+/* Общий стиль для кнопок */
+.author-panel__actions button {
+  flex: 1;
+  height: 52px !important;
+  border-radius: 16px !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+/* Общие стили для встроенных иконок */
+button svg,
+.action-btn svg {
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
+  stroke: currentColor;
+}
+
+/* Отступ, если после иконки есть текст */
+button svg + span,
+button svg + i,
+.author-panel__write-btn svg {
+  margin-right: 8px;
+}
+
+/* Центрирование иконок в кнопках действий */
+.author-panel__actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* СОСТОЯНИЕ: НЕ ПОДПИСАН */
+.author-panel__subscribe-btn:not(.is-following) {
+  background: var(--accent) !important;
+  color: #ffffff !important;
+  box-shadow: 0 8px 20px rgba(90, 135, 255, 0.25);
+}
+
+/* СОСТОЯНИЕ: ПОДПИСАН */
+.author-panel__subscribe-btn.is-following {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: var(--text-main) !important;
+}
+
+@media (hover: hover) {
+  .author-panel__subscribe-btn.is-following:hover {
+    background: rgba(239, 68, 68, 0.1) !important;
+    border-color: rgba(239, 68, 68, 0.4) !important;
+    color: #ef4444 !important;
+  }
+  .author-panel__subscribe-btn.is-following:hover span {
+    display: none;
+  }
+  .author-panel__subscribe-btn.is-following:hover::after {
+    content: attr(data-text-unsub);
+  }
+}
+
+@media (hover: none) {
+  .author-panel__subscribe-btn.is-following:active {
+    background: rgba(239, 68, 68, 0.1) !important;
+    border-color: rgba(239, 68, 68, 0.4) !important;
+    color: #ef4444 !important;
+  }
+  .author-panel__subscribe-btn.is-following:active span {
+    display: none;
+  }
+  .author-panel__subscribe-btn.is-following:active::after {
+    content: attr(data-text-unsub);
+  }
+}
+
+/* Кнопка Написать */
+.author-panel__write-btn {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: var(--text-main) !important;
+}
+
+.author-panel__write-btn i {
+  margin-right: 10px;
+  font-size: 17px;
+}
+
+/* Эффект наведения */
+.author-panel__actions button:hover {
+  filter: brightness(1.2);
+  transform: translateY(-1px);
+}
+
+/* Эффект при наведении */
+.author-panel__actions button:hover {
+  filter: brightness(1.2);
+  transform: translateY(-1px);
 }
 
 .author-panel__error {
