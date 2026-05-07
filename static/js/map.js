@@ -2323,7 +2323,8 @@ function renderSubscriptionsList() {
 function applySubscriptionFilters() {
   subscribedAuthorNicknames.clear();
   subscriptions.forEach((subscription) => {
-    const normalized = (subscription?.nickname || '').trim().toLowerCase();
+    const nicknameValue = typeof subscription === 'string' ? subscription : (subscription?.nickname || '');
+    const normalized = nicknameValue.trim().toLowerCase();
     if (normalized) {
       subscribedAuthorNicknames.add(normalized);
     }
