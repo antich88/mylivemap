@@ -1491,7 +1491,7 @@ function renderAuthorProfileContent(author) {
   const gender = formatAuthorGender(author.gender);
 
   const avatarMarkup = avatarUrl
-    ? `<img src="${avatarUrl}" alt="Аватар" style="width:100%; height:100%; border-radius:50%; object-fit:cover;">`
+    ? `<img src="${avatarUrl}" alt="Аватар" style="width:100%; height:100%; border-radius:50%; object-fit:cover;" loading="lazy">`
     : letter;
 
   return `
@@ -3668,7 +3668,7 @@ function createMarkerLabelIcon(pin) {
 
   const avatarUrl = pin.author?.avatar_url;
   const avatarMarkup = avatarUrl
-    ? `<img src="${avatarUrl}" class="marker-avatar-img" alt="" onerror="this.parentNode.classList.remove('has-avatar'); this.remove();">`
+    ? `<img src="${avatarUrl}" class="marker-avatar-img" alt="" loading="lazy" onerror="this.parentNode.classList.remove('has-avatar'); this.remove();">`
     : '';
 
   const markerHtml = `

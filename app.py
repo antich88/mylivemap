@@ -186,37 +186,136 @@ def create_app() -> Flask:
         }
 
     def _build_user_state(nickname: str) -> dict:
-        base = {"nickname": nickname, "age": None, "gender": None, "avatar_url": None}
-        base["rating_total"] = get_user_rating_total(nickname)
-        # reputation state
-        reputation = get_reputation_state(nickname)
-        base.update(reputation)
-        try:
-            profile = get_or_create_user_profile(nickname)
-        except Exception as exc:  # pragma: no cover
-            app.logger.exception("Failed to load profile for %s: %s", nickname, exc)
-            base["profile"] = None
+        base = {
+            "nickname": nickname,
+            "age": None,
+            "gender": None,
+            "avatar_url": None,
+            "rating_total": 0,
+            "reputation_points": 0,
+            "reputation_level": 0,
+            "level_up_pending": False,
+            "is_verified": False,
+            "profile": None,
+            "subscriptions": [],
+            "followers_count": 0,
+        }
+        if LOCAL_MODE:
+            base["rating_total"] = get_user_rating_total(nickname)
+            reputation = get_reputation_state(nickname)
+            base.update(reputation)
+            try:
+                profile = get_or_create_user_profile(nickname)
+            except Exception as exc:  # pragma: no cover
+                app.logger.exception("Failed to load profile for %s: %s", nickname, exc)
+                return base
+            serialized = _serialize_profile(profile)
+            if serialized:
+                base.update(
+                    {
+                        "age": serialized.get("age"),
+                        "gender": serialized.get("gender"),
+                        "avatar_url": serialized.get("avatar_url"),
+                        "profile": serialized,
+                    }
+                )
+            try:
+                base["subscriptions"] = get_user_subscriptions(nickname)
+            except Exception:  # pragma: no cover
+                base["subscriptions"] = []
+            try:
+                base["followers_count"] = get_user_followers_count(nickname)
+            except Exception:  # pragma: no cover
+                base["followers_count"] = 0
             return base
-        serialized = _serialize_profile(profile)
-        if serialized:
-            base.update(
-                {
-                    "age": serialized.get("age"),
-                    "gender": serialized.get("gender"),
-                    "avatar_url": serialized.get("avatar_url"),
-                    "profile": serialized,
-                }
+
+        try:
+            get_or_create_user_profile(nickname)
+        except Exception as exc:  # pragma: no cover
+            app.logger.exception("Failed to ensure profile for %s: %s", nickname, exc)
+            return base
+
+        from sqlalchemy import func, select
+
+        now_iso = datetime.now(timezone.utc)
+        rating_subq = (
+            select(
+                pins_table.c.user_id.label("user_id"),
+                func.coalesce(func.sum(pins_table.c.rating), 0).label("rating_total"),
             )
-        else:
-            base["profile"] = None
+            .where(
+                pins_table.c.user_id == nickname,
+                (pins_table.c.expires_at.is_(None) | (pins_table.c.expires_at > now_iso)),
+            )
+            .group_by(pins_table.c.user_id)
+            .subquery()
+        )
+        followers_subq = (
+            select(
+                user_subscriptions_table.c.author_id.label("author_id"),
+                func.count().label("followers_count"),
+            )
+            .where(user_subscriptions_table.c.author_id == nickname)
+            .group_by(user_subscriptions_table.c.author_id)
+            .subquery()
+        )
+        profile_stmt = (
+            select(
+                profiles_table.c.nickname,
+                profiles_table.c.age,
+                profiles_table.c.gender,
+                profiles_table.c.avatar_path,
+                profiles_table.c.reputation_points,
+                profiles_table.c.level_up_pending,
+                profiles_table.c.is_verified,
+                profiles_table.c.created_at,
+                profiles_table.c.updated_at,
+                func.coalesce(rating_subq.c.rating_total, 0).label("rating_total"),
+                func.coalesce(followers_subq.c.followers_count, 0).label("followers_count"),
+            )
+            .select_from(
+                profiles_table
+                .outerjoin(rating_subq, rating_subq.c.user_id == profiles_table.c.nickname)
+                .outerjoin(followers_subq, followers_subq.c.author_id == profiles_table.c.nickname)
+            )
+            .where(profiles_table.c.nickname == nickname)
+        )
         try:
-            base["subscriptions"] = get_user_subscriptions(nickname)
-        except Exception:  # pragma: no cover
+            with session_scope() as session:
+                row = session.execute(profile_stmt).mappings().first()
+                if not row:
+                    app.logger.warning("Profile row missing for %s after ensure, skipping data aggregation", nickname)
+                    return base
+
+                profile_data = dict(row)
+                base["rating_total"] = int(profile_data.get("rating_total") or 0)
+                points = _clamp_points(profile_data.get("reputation_points", 0))
+                base["reputation_points"] = points
+                base["reputation_level"] = calculate_reputation_level(points)
+                base["level_up_pending"] = bool(profile_data.get("level_up_pending") or False)
+                base["is_verified"] = bool(profile_data.get("is_verified") or False)
+                serialized = _serialize_profile(profile_data)
+                if serialized:
+                    base.update(
+                        {
+                            "age": serialized.get("age"),
+                            "gender": serialized.get("gender"),
+                            "avatar_url": serialized.get("avatar_url"),
+                            "profile": serialized,
+                        }
+                    )
+                else:
+                    base["profile"] = None
+                base["followers_count"] = int(profile_data.get("followers_count") or 0)
+
+                subs_stmt = select(user_subscriptions_table.c.author_id).where(
+                    user_subscriptions_table.c.follower_id == nickname
+                )
+                raw_subs = session.execute(subs_stmt).scalars().all()
+                base["subscriptions"] = [str(value or "").lower() for value in raw_subs if value]
+        except Exception as exc:
+            app.logger.exception("_build_user_state failed for %s: %s", nickname, exc)
             base["subscriptions"] = []
-        base["followers_count"] = 0
-        try:
-            base["followers_count"] = get_user_followers_count(nickname)
-        except Exception:  # pragma: no cover
             base["followers_count"] = 0
         return base
 
