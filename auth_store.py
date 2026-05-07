@@ -16,6 +16,7 @@ from database import (
     users_table,
     user_subscriptions_table,
 )
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 
 LOCAL_MODE = is_local_mode()
@@ -168,12 +169,12 @@ def add_user_subscription(user_nickname: str, author_nickname: str) -> None:
         profile["updated_at"] = now.isoformat()
         _persist_local_profile(profile)
         return
-    from sqlalchemy import insert
     with session_scope() as session:
         try:
             stmt = (
-                insert(user_subscriptions_table)
+                pg_insert(user_subscriptions_table)
                 .values(follower_id=user_norm, author_id=author_norm, created_at=now)
+                .on_conflict_do_nothing()
                 .execution_options(synchronize_session=False)
             )
             session.execute(stmt)

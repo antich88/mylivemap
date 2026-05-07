@@ -162,7 +162,7 @@ else:
     profiles_table = Table(
         "user_profiles",
         metadata,
-        Column("nickname", String(255), ForeignKey("users.nickname", ondelete="CASCADE"), primary_key=True),
+    Column("nickname", String(255), ForeignKey("users.nickname", ondelete="CASCADE", onupdate="CASCADE"), primary_key=True),
         Column("age", Integer),
         Column("gender", String(16)),
         Column("avatar_path", String(512)),
@@ -189,8 +189,8 @@ else:
         "friendships",
         metadata,
         Column("id", Integer, primary_key=True),
-        Column("user_id", String(255), ForeignKey("users.nickname", ondelete="CASCADE"), nullable=False),
-        Column("friend_id", String(255), ForeignKey("users.nickname", ondelete="CASCADE"), nullable=False),
+        Column("user_id", String(255), ForeignKey("users.nickname", ondelete="CASCADE", onupdate="CASCADE"), nullable=False),
+        Column("friend_id", String(255), ForeignKey("users.nickname", ondelete="CASCADE", onupdate="CASCADE"), nullable=False),
         Column("status", String(32), nullable=False, server_default=text("'pending'"), default="pending"),
         UniqueConstraint("user_id", "friend_id", name="uq_friendships_user_friend"),
     )
@@ -199,8 +199,8 @@ else:
         "user_subscriptions",
         metadata,
         Column("id", Integer, primary_key=True),
-        Column("follower_id", String(255), ForeignKey("users.nickname", ondelete="CASCADE"), nullable=False),
-        Column("author_id", String(255), ForeignKey("users.nickname", ondelete="CASCADE"), nullable=False),
+        Column("follower_id", String(255), ForeignKey("users.nickname", ondelete="CASCADE", onupdate="CASCADE"), nullable=False),
+        Column("author_id", String(255), ForeignKey("users.nickname", ondelete="CASCADE", onupdate="CASCADE"), nullable=False),
         Column("created_at", DateTime(timezone=True), nullable=False),
         UniqueConstraint("follower_id", "author_id", name="uq_user_subscriptions_follower_author"),
     )

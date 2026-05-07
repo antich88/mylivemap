@@ -66,6 +66,7 @@ from database import (
     profiles_table,
     session_scope,
     users_table,
+    user_subscriptions_table,
 )
 from models import (
     active_pins,
@@ -1132,12 +1133,23 @@ def create_app() -> Flask:
 
     @app.route("/admin/fix-db-nicknames-secret-99")
     def fix_db_nicknames() -> tuple[str, int]:
-        from sqlalchemy import func, update
-
+        from sqlalchemy import func, text, update
+        from database import (
+            users_table,
+            profiles_table,
+            user_subscriptions_table,
+            session_scope,
+        )
         with session_scope() as session:
+            session.execute(update(user_subscriptions_table).values(
+                follower_id=func.lower(user_subscriptions_table.c.follower_id),
+                author_id=func.lower(user_subscriptions_table.c.author_id)
+            ))
             session.execute(update(users_table).values(nickname=func.lower(users_table.c.nickname)))
             session.execute(update(profiles_table).values(nickname=func.lower(profiles_table.c.nickname)))
-        return "База данных успешно переведена в нижний регистр!", 200
+            session.execute(text("DELETE FROM users WHERE nickname IN ('a', 'A')"))
+            session.execute(text("DELETE FROM user_subscriptions WHERE author_id IN ('a', 'A') OR follower_id IN ('a', 'A')"))
+        return "База данных полностью синхронизирована и очищена!", 200
 
     @app.route("/health")
     def healthcheck() -> tuple[dict, int]:
