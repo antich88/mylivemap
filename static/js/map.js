@@ -1550,6 +1550,73 @@ function renderAuthorProfileContent(author) {
   `;
 }
 
+function animateAuthorSheetOpen() {
+  const { panel, backdrop } = getAuthorSheetElements();
+  if (!panel) {
+    return;
+  }
+  if (backdrop) {
+    backdrop.removeAttribute('hidden');
+  }
+  panel.removeAttribute('hidden');
+  panel.style.transition = 'none';
+  panel.style.transform = 'translateY(100%)';
+  requestAnimationFrame(() => {
+    panel.style.transition = 'transform 0.35s cubic-bezier(0.32, 0.72, 0, 1)';
+    panel.style.transform = 'translateY(0)';
+  });
+}
+
+function renderAuthorPanelSkeleton(nickname = '') {
+  const container = document.getElementById('author-sheet-content');
+  if (!container) {
+    return;
+  }
+  authorPanelCurrentNickname = nickname.trim();
+  const safeNickname = escapeHtml(nickname || 'Автор');
+  container.innerHTML = `
+    <div class="author-panel-skeleton">
+      <div class="author-panel-skeleton__header">
+        <div class="skeleton-avatar skeleton-pulse" aria-hidden="true"></div>
+        <div class="author-panel-skeleton__text">
+          <div class="author-panel-skeleton__name">${safeNickname}</div>
+          <div class="skeleton-text skeleton-pulse skeleton-text--wide"></div>
+          <div class="skeleton-text skeleton-pulse skeleton-text--narrow"></div>
+        </div>
+      </div>
+      <div class="author-panel-skeleton__stats">
+        <span class="skeleton-stat skeleton-pulse"></span>
+        <span class="skeleton-stat skeleton-pulse"></span>
+        <span class="skeleton-stat skeleton-pulse"></span>
+      </div>
+      <div class="author-panel-skeleton__list">
+        <div class="skeleton-pin-row skeleton-pulse"></div>
+        <div class="skeleton-pin-row skeleton-pulse"></div>
+        <div class="skeleton-pin-row skeleton-pulse"></div>
+      </div>
+    </div>
+  `;
+}
+
+function renderAuthorPanelError(message) {
+  const container = document.getElementById('author-sheet-content');
+  if (!container) {
+    return;
+  }
+  container.innerHTML = `
+    <div class="author-panel__error">
+      <p>${escapeHtml(message)}</p>
+      <button type="button" class="author-panel__error-close">Закрыть</button>
+    </div>
+  `;
+  const closeButton = container.querySelector('.author-panel__error-close');
+  if (closeButton) {
+    closeButton.addEventListener('click', () => {
+      closeAuthorSheet();
+    });
+  }
+}
+
 function showAuthorPanel(author) {
   const { panel, backdrop } = getAuthorSheetElements();
   const content = document.getElementById('author-sheet-content');
@@ -1572,6 +1639,9 @@ function openAuthorPanel(authorId) {
   if (!normalizedId) {
     return;
   }
+  animateAuthorSheetOpen();
+  renderAuthorPanelSkeleton(normalizedId);
+
   return fetch(`/api/authors/${encodeURIComponent(normalizedId)}`, { credentials: 'same-origin' })
     .then(handleJsonResponse)
     .then((payload) => {
@@ -1583,7 +1653,9 @@ function openAuthorPanel(authorId) {
       return author;
     })
     .catch((error) => {
-      showUserToast(error.message || 'Не удалось открыть профиль автора.');
+      const message = error?.message || 'Пользователь не найден.';
+      renderAuthorPanelError(message);
+      showUserToast(message);
       throw error;
     });
 }

@@ -1657,6 +1657,128 @@ html {
   padding-bottom: 8px;
 }
 
+.skeleton-pulse {
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
+  border-radius: 999px;
+}
+
+.author-panel-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.author-panel-skeleton__header {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.skeleton-avatar {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.author-panel-skeleton__text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.author-panel-skeleton__name {
+  height: 18px;
+  width: 70%;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  font-weight: 700;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  padding-left: 12px;
+}
+
+.skeleton-text {
+  height: 12px;
+  width: 100%;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.skeleton-text--wide {
+  width: 90%;
+}
+
+.skeleton-text--narrow {
+  width: 60%;
+}
+
+.author-panel-skeleton__stats {
+  display: flex;
+  gap: 8px;
+}
+
+.skeleton-stat {
+  flex: 1;
+  height: 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.author-panel-skeleton__list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skeleton-pin-row {
+  height: 45px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.author-panel__error {
+  text-align: center;
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+.author-panel__error button {
+  border-radius: 999px;
+  border: none;
+  padding: 0.65rem 1.2rem;
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.author-panel__error button:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+@keyframes skeleton-pulse {
+  0% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0.4;
+  }
+}
+
 .create-sheet__drag-handle {
   width: 36px;
   height: 4px;
