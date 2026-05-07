@@ -211,6 +211,7 @@ def create_app() -> Flask:
             base["subscriptions"] = get_user_subscriptions(nickname)
         except Exception:  # pragma: no cover
             base["subscriptions"] = []
+        base["followers_count"] = 0
         try:
             base["followers_count"] = get_user_followers_count(nickname)
         except Exception:  # pragma: no cover

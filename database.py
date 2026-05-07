@@ -244,6 +244,10 @@ else:
             metadata.create_all(ENGINE, tables=[table])
             table_names.add(table.name)
 
+        if not inspector.has_table("user_subscriptions"):
+            with ENGINE.begin() as conn:
+                user_subscriptions_table.create(conn)
+
         # pins: ensure image_url
         if "pins" in table_names:
             pin_columns = {col["name"] for col in inspector.get_columns("pins")}

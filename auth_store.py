@@ -573,7 +573,8 @@ def adjust_user_reputation(nickname: str, delta: int, *, trigger_level_up: bool 
 
 
 def create_user(nickname: str, password: str) -> Optional[AuthUser]:
-    normalized = _normalize_nickname(nickname)
+    nickname = _normalize_nickname(nickname)
+    normalized = nickname
     if not normalized or not password:
         return None
     if get_user_by_nickname(normalized):
