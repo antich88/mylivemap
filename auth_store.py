@@ -145,13 +145,13 @@ def get_user_subscriptions(nickname: str) -> List[str]:
         profile = _local_profile_record(normalized)
         if not profile:
             return []
-        return list(profile.get("subscriptions") or [])
+        return [str(nickname or "").lower() for nickname in (profile.get("subscriptions") or [])]
     from sqlalchemy import select
     with session_scope() as session:
         stmt = select(user_subscriptions_table.c.author_id).where(
             user_subscriptions_table.c.follower_id == normalized
         )
-        return [str(row[0]) for row in session.execute(stmt).scalars().all()]
+        return [str(row[0]).lower() for row in session.execute(stmt).scalars().all()]
 
 
 def add_user_subscription(user_nickname: str, author_nickname: str) -> None:

@@ -1010,7 +1010,7 @@ def create_app() -> Flask:
             except Exception:  # pragma: no cover
                 payload = []
             subscriptions_payload = []
-            unique_nicknames = {n for n in payload if n}
+            unique_nicknames = {n.lower() for n in payload if n}
             if LOCAL_MODE:
                 for nickname in payload:
                     if not nickname:
@@ -1029,24 +1029,24 @@ def create_app() -> Flask:
 
             profile_map: dict[str, dict] = {}
             if unique_nicknames:
-                from sqlalchemy import select
+                from sqlalchemy import select, func
 
                 with session_scope() as db_session:
                     profile_stmt = select(
                         profiles_table.c.nickname,
                         profiles_table.c.avatar_path,
-                    ).where(profiles_table.c.nickname.in_(unique_nicknames))
+                    ).where(func.lower(profiles_table.c.nickname).in_(unique_nicknames))
                     profile_rows = db_session.execute(profile_stmt).mappings().all()
                 for row in profile_rows:
                     nickname_key = row.get("nickname")
                     if not nickname_key:
                         continue
-                    profile_map[nickname_key] = dict(row)
+                    profile_map[nickname_key.lower()] = dict(row)
             for nickname in payload:
                 if not nickname:
                     continue
                 serialized = None
-                profile_dict = profile_map.get(nickname)
+                profile_dict = profile_map.get(nickname.lower())
                 if profile_dict:
                     serialized = _serialize_profile(profile_dict)
                 subscriptions_payload.append(
@@ -1138,17 +1138,17 @@ def create_app() -> Flask:
         from sqlalchemy import func, text, update
         from database import users_table, profiles_table, user_subscriptions_table, session_scope
         with session_scope() as session:
-            # 1. Сначала нормализуем регистр везде
+            # 1. Сначала удаляем мусор по таблицам (имена колонок везде разные!)
+            session.execute(text("DELETE FROM user_subscriptions WHERE author_id IN ('a', 'A') OR follower_id IN ('a', 'A')"))
+            session.execute(text("DELETE FROM user_profiles WHERE nickname IN ('a', 'A')"))
+            session.execute(text("DELETE FROM users WHERE nickname IN ('a', 'A')"))
+            # 2. Теперь нормализуем регистр в оставшихся записях
             session.execute(update(user_subscriptions_table).values(
                 follower_id=func.lower(user_subscriptions_table.c.follower_id),
                 author_id=func.lower(user_subscriptions_table.c.author_id)
             ))
             session.execute(update(users_table).values(nickname=func.lower(users_table.c.nickname)))
             session.execute(update(profiles_table).values(nickname=func.lower(profiles_table.c.nickname)))
-            # 2. Удаляем мусор по таблицам (имена колонок везде разные!)
-            session.execute(text("DELETE FROM user_subscriptions WHERE author_id IN ('a', 'A') OR follower_id IN ('a', 'A')"))
-            session.execute(text("DELETE FROM user_profiles WHERE nickname IN ('a', 'A')"))
-            session.execute(text("DELETE FROM users WHERE nickname IN ('a', 'A')"))
         return "База данных полностью очищена и синхронизирована!", 200
 
     @app.route("/health")
