@@ -2264,6 +2264,21 @@ function renderAuthorActivePinsList(nickname) {
   });
 }
 
+function isRenderableSubscription(subscription) {
+  const nicknameValue = typeof subscription === 'string'
+    ? subscription
+    : (subscription?.nickname || '');
+  const normalized = (nicknameValue || '').trim();
+  if (!normalized || normalized.length <= 1) {
+    return false;
+  }
+  const avatarUrl = subscription && typeof subscription === 'object' ? subscription.avatar_url : null;
+  if (avatarUrl == null) {
+    return false;
+  }
+  return true;
+}
+
 function ensureSubscriptionElements() {
   if (!subscriptionsSectionEl || !subscriptionsListEl || !subscriptionsCountEl) {
     subscriptionsSectionEl = document.querySelector('[data-subscriptions-section]');
@@ -2287,6 +2302,9 @@ function renderSubscriptionsList() {
   const fragment = document.createDocumentFragment();
   
   subscriptions.forEach((subscription) => {
+    if (!isRenderableSubscription(subscription)) {
+      return;
+    }
     const nickname = (subscription?.nickname || '').trim();
     if (!nickname) return;
     
@@ -2323,6 +2341,9 @@ function renderSubscriptionsList() {
 function applySubscriptionFilters() {
   subscribedAuthorNicknames.clear();
   subscriptions.forEach((subscription) => {
+    if (!isRenderableSubscription(subscription)) {
+      return;
+    }
     const nicknameValue = typeof subscription === 'string' ? subscription : (subscription?.nickname || '');
     const normalized = nicknameValue.trim().toLowerCase();
     if (normalized) {

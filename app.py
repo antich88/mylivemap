@@ -1135,20 +1135,77 @@ def create_app() -> Flask:
 
     @app.route("/admin/fix-db-nicknames-secret-99")
     def fix_db_nicknames() -> tuple[str, int]:
-        from sqlalchemy import func, text, update
-        from database import users_table, profiles_table, user_subscriptions_table, session_scope
+        from sqlalchemy import delete, func, select, text, update
+        from database import profiles_table, session_scope, user_subscriptions_table, users_table
+
+        def _find_case_conflicts(session):
+            normalized_rows = session.execute(
+                select(
+                    func.lower(users_table.c.nickname).label("normalized"),
+                    func.array_agg(users_table.c.nickname).label("nicknames"),
+                )
+                .group_by(func.lower(users_table.c.nickname))
+                .having(func.count() > 1)
+            ).all()
+            duplicates = []
+            for row in normalized_rows:
+                lowered = str(row.normalized or "").strip()
+                if not lowered:
+                    continue
+                nicknames = row.nicknames or []
+                keep_target = lowered
+                if keep_target not in nicknames and nicknames:
+                    keep_target = nicknames[0]
+                duplicates.extend(nick for nick in nicknames if nick != keep_target)
+            return duplicates
+
         with session_scope() as session:
-            # 1. Сначала удаляем мусор по таблицам (имена колонок везде разные!)
-            session.execute(text("DELETE FROM user_subscriptions WHERE author_id IN ('a', 'A') OR follower_id IN ('a', 'A')"))
-            session.execute(text("DELETE FROM user_profiles WHERE nickname IN ('a', 'A')"))
-            session.execute(text("DELETE FROM users WHERE nickname IN ('a', 'A')"))
-            # 2. Теперь нормализуем регистр в оставшихся записях
-            session.execute(update(user_subscriptions_table).values(
-                follower_id=func.lower(user_subscriptions_table.c.follower_id),
-                author_id=func.lower(user_subscriptions_table.c.author_id)
-            ))
-            session.execute(update(users_table).values(nickname=func.lower(users_table.c.nickname)))
-            session.execute(update(profiles_table).values(nickname=func.lower(profiles_table.c.nickname)))
+            try:
+                session.execute(
+                    text(
+                        "DELETE FROM user_subscriptions "
+                        "WHERE author_id NOT IN (SELECT nickname FROM users) "
+                        "OR follower_id NOT IN (SELECT nickname FROM users)"
+                    )
+                )
+                session.execute(
+                    text(
+                        "DELETE FROM user_subscriptions "
+                        "WHERE author_id IN ('a', 'A') OR follower_id IN ('a', 'A')"
+                    )
+                )
+                session.execute(text("DELETE FROM user_profiles WHERE nickname IN ('a', 'A')"))
+                session.execute(text("DELETE FROM users WHERE nickname IN ('a', 'A')"))
+
+                conflicting_nicknames = _find_case_conflicts(session)
+                if conflicting_nicknames:
+                    session.execute(
+                        delete(user_subscriptions_table).where(
+                            user_subscriptions_table.c.author_id.in_(conflicting_nicknames)
+                            | user_subscriptions_table.c.follower_id.in_(conflicting_nicknames)
+                        )
+                    )
+                    session.execute(
+                        delete(profiles_table).where(profiles_table.c.nickname.in_(conflicting_nicknames))
+                    )
+                    session.execute(
+                        delete(users_table).where(users_table.c.nickname.in_(conflicting_nicknames))
+                    )
+
+                session.execute(
+                    update(user_subscriptions_table).values(
+                        follower_id=func.lower(user_subscriptions_table.c.follower_id),
+                        author_id=func.lower(user_subscriptions_table.c.author_id),
+                    )
+                )
+                session.execute(update(users_table).values(nickname=func.lower(users_table.c.nickname)))
+                session.execute(update(profiles_table).values(nickname=func.lower(profiles_table.c.nickname)))
+
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+
         return "База данных полностью очищена и синхронизирована!", 200
 
     @app.route("/health")

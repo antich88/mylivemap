@@ -151,7 +151,9 @@ def get_user_subscriptions(nickname: str) -> List[str]:
         stmt = select(user_subscriptions_table.c.author_id).where(
             user_subscriptions_table.c.follower_id == normalized
         )
-        return [str(row[0]).lower() for row in session.execute(stmt).scalars().all()]
+        rows = session.execute(stmt).scalars().all()
+        logger.info("get_user_subscriptions fetched %d rows for %s", len(rows), normalized)
+        return [str(row or "").lower() for row in rows]
 
 
 def add_user_subscription(user_nickname: str, author_nickname: str) -> None:
