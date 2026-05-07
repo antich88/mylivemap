@@ -1259,7 +1259,8 @@ function isNicknameSubscribed(nickname) {
 }
 
 function refreshAuthorPanelSubscribeButtonState() {
-  const subscribeBtn = document.querySelector('.author-panel__subscribe-btn');
+  const container = document.getElementById('author-sheet-content');
+  const subscribeBtn = container ? container.querySelector('.author-panel__subscribe-btn') : null;
   if (!subscribeBtn) {
     return;
   }
@@ -1317,7 +1318,8 @@ function updateAuthorPanelContent(author) {
 }
 
 function bindAuthorPanelSubscribeButton(author) {
-  const authorSubscribeBtn = document.querySelector('.author-panel__subscribe-btn');
+  const container = document.getElementById('author-sheet-content');
+  const authorSubscribeBtn = container ? container.querySelector('.author-panel__subscribe-btn') : null;
   if (!authorSubscribeBtn) {
     return;
   }
@@ -2270,10 +2272,6 @@ function isRenderableSubscription(subscription) {
     : (subscription?.nickname || '');
   const normalized = (nicknameValue || '').trim();
   if (!normalized || normalized.length <= 1) {
-    return false;
-  }
-  const avatarUrl = subscription && typeof subscription === 'object' ? subscription.avatar_url : null;
-  if (avatarUrl == null) {
     return false;
   }
   return true;
