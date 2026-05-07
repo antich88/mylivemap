@@ -24,11 +24,11 @@ const SUBSCRIPTION_STORAGE_KEY = 'liveMapSubscribedAuthors';
 
 // Конфигурация уровней репутации (ключи строго числовые 1–5)
 const REPUTATION_LEVELS_CONFIG = {
-  1: { key: 'novice', label: 'Новичок', icon: '🌱' },
-  2: { key: 'active', label: 'Активный', icon: '⚡' },
-  3: { key: 'verified', label: 'Проверенный', icon: '🛡' },
-  4: { key: 'expert', label: 'Эксперт', icon: '👑' },
-  5: { key: 'legend', label: 'Легенда', icon: '💎' },
+  1: { key: 'novice', label: 'Новичок', icon: '🌱', color: '#94a3b8' },
+  2: { key: 'active', label: 'Активный', icon: '⚡', color: '#22c55e' },
+  3: { key: 'verified', label: 'Проверенный', icon: '🛡', color: '#2563eb' },
+  4: { key: 'expert', label: 'Эксперт', icon: '👑', color: '#ea580c' },
+  5: { key: 'legend', label: 'Легенда', icon: '💎', color: '#a855f7' },
 };
 let levelUpAckedOnce = false;
 
@@ -38,6 +38,24 @@ function getReputationLevelConfig(levelRaw) {
     return null;
   }
   return REPUTATION_LEVELS_CONFIG[levelNumber] || REPUTATION_LEVELS_CONFIG[1] || null;
+}
+
+function getPinNoun(count) {
+  if (typeof count !== 'number' || Number.isNaN(count)) {
+    return 'меток';
+  }
+  const absCount = Math.abs(count) % 100;
+  const lastDigit = absCount % 10;
+  if (absCount >= 11 && absCount <= 14) {
+    return 'меток';
+  }
+  if (lastDigit === 1) {
+    return 'метка';
+  }
+  if (lastDigit >= 2 && lastDigit <= 4) {
+    return 'метки';
+  }
+  return 'меток';
 }
 let subscriptionsFilterActive = false;
 const subscribedAuthorNicknames = new Set();
@@ -2310,8 +2328,16 @@ function renderSubscriptionsList() {
     const letter = safeNickname.charAt(0).toUpperCase() || 'A';
     const avatarUrl = subscription?.avatar_url ? escapeHtml(subscription.avatar_url) : '';
     
-    // Временно заглушка для статуса, пока API подписок не отдает reputation_level
-    const statusText = 'АВТОР'; 
+    const levelConfig = getReputationLevelConfig(subscription?.reputation_level) || REPUTATION_LEVELS_CONFIG[1];
+    const activePinsCount = typeof subscription?.active_pins_count === 'number' ? subscription.active_pins_count : 0;
+    const pinWord = getPinNoun(activePinsCount);
+    const statusText = `
+      <span class="user-status-badge status-${levelConfig.key}" style="display: inline-flex; align-items: center; padding: 2px 6px; font-size: 0.75rem; border-radius: 4px; pointer-events: none;">
+        <span class="status-badge-icon" aria-hidden="true">${levelConfig.icon}</span>
+        <span style="margin-left: 4px;">${levelConfig.label}</span>
+      </span>
+      <span style="margin-left: 6px; opacity: 0.7; text-transform: none; vertical-align: middle;">• ${activePinsCount} ${pinWord}</span>
+    `;
 
     const item = document.createElement('a');
     item.href = '#';
@@ -2327,9 +2353,12 @@ function renderSubscriptionsList() {
         <span class="person-name">${safeNickname}</span>
         <span class="person-meta">${statusText}</span>
       </div>
-      <button class="action-btn">Профиль</button>
     `;
     
+    item.addEventListener('click', (event) => {
+      event.preventDefault();
+      openAuthorPanel(nickname);
+    });
     fragment.appendChild(item);
   });
   
@@ -2862,9 +2891,10 @@ function renderAuthState(message = '') {
       toggleUserPanelExpandedState(true);
     }
     celebrateLevelUpIfNeeded(currentAuthUser);
-  } else {
-    stopActivePinsClock();
-  }
+    } else {
+      stopActivePinsClock();
+      fetchSubscriptions();
+    }
   renderAuthState.previousAuthenticated = authenticated;
   syncAuthorCloseButtonLabel();
   updateFollowersCounter(currentAuthUser?.followers_count ?? 0);
@@ -2958,7 +2988,11 @@ function initProfileSettings() {
       if (badgeContainer) {
         badgeContainer.innerHTML = renderReputationBadge(currentAuthUser || {});
       }
-  };
+      const profileRatingValue = Number.isFinite(currentAuthUser?.rating_total)
+        ? currentAuthUser.rating_total
+        : 0;
+      updateProfileRating(profileRatingValue);
+    };
 
    const syncProfileSnapshot = () => {
     profileSnapshot = {

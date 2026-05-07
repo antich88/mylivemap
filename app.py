@@ -1118,10 +1118,13 @@ def create_app() -> Flask:
                         author_state = _build_user_state(nickname)
                     except Exception:
                         continue
+                    pin_count = len([pin for pin in active_pins() if (pin.user_id or "").lower() == nickname.lower()])
                     subscriptions_payload.append(
                         {
                             "nickname": author_state.get("nickname"),
                             "avatar_url": author_state.get("avatar_url"),
+                            "reputation_level": author_state.get("reputation_level", 1),
+                            "active_pins_count": pin_count,
                         }
                     )
                 return {"subscriptions": subscriptions_payload}, 200
@@ -1134,6 +1137,7 @@ def create_app() -> Flask:
                     profile_stmt = select(
                         profiles_table.c.nickname,
                         profiles_table.c.avatar_path,
+                        profiles_table.c.reputation_points,
                     ).where(func.lower(profiles_table.c.nickname).in_(unique_nicknames))
                     profile_rows = db_session.execute(profile_stmt).mappings().all()
                 for row in profile_rows:
@@ -1148,10 +1152,15 @@ def create_app() -> Flask:
                 profile_dict = profile_map.get(nickname.lower())
                 if profile_dict:
                     serialized = _serialize_profile(profile_dict)
+                points = profile_dict.get("reputation_points", 0) if profile_dict else 0
+                rep_level = calculate_reputation_level(points)
+                pin_count = len([pin for pin in active_pins() if (pin.user_id or "").lower() == nickname.lower()])
                 subscriptions_payload.append(
                     {
                         "nickname": nickname,
                         "avatar_url": serialized.get("avatar_url") if serialized else None,
+                        "reputation_level": rep_level,
+                        "active_pins_count": pin_count,
                     }
                 )
             return {"subscriptions": subscriptions_payload}, 200
