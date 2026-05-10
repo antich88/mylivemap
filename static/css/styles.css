@@ -6,6 +6,51 @@
   --accent: #5a87ff;
 }
 
+/* inbox */
+#inbox-screen {
+    display: none;
+    flex-direction: column;
+    background: var(--background);
+    z-index: 100;
+}
+#inbox-screen.view-screen--active { display: flex !important; }
+
+.inbox-container { flex: 1; overflow-y: auto; padding: 10px 0; }
+
+.dialog-card {
+    display: flex;
+    align-items: center;
+    padding: 15px 20px;
+    gap: 15px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.dialog-card:hover { background: rgba(255, 255, 255, 0.03); }
+
+.dialog-avatar {
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    background: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: bold; color: white; flex-shrink: 0;
+}
+
+.dialog-info { flex: 1; min-width: 0; }
+.dialog-header { display: flex; justify-content: space-between; margin-bottom: 4px; }
+.dialog-name { font-weight: 700; color: #fff; font-size: 15px; }
+.dialog-time { font-size: 11px; color: var(--text-muted); }
+.dialog-last-msg {
+    font-size: 13px; color: var(--text-muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.unread-badge {
+    background: var(--accent);
+    color: white; font-size: 10px; font-weight: 700;
+    padding: 2px 6px; border-radius: 10px; min-width: 18px; text-align: center;
+}
+
 .user-toast {
   position: fixed;
   bottom: 1.5rem;
@@ -352,6 +397,16 @@ html {
   margin: 0 !important;
 }
 
+/* Плавный скролл для попапов при открытой клавиатуре */
+body.keyboard-open .leaflet-popup-content-wrapper {
+  transition: transform 0.3s ease-out;
+}
+
+/* Отступ снизу у формы комментариев */
+.pin-popup__comment-form {
+  padding-bottom: 10px;
+}
+
 .subscription-card__body {
   flex: 1;
   display: flex !important;
@@ -410,6 +465,70 @@ html {
 .subscription-card__meta {
   font-size: 0.75rem;
   color: rgba(255, 255, 255, 0.65);
+}
+
+/* Скрываем нижнее меню, когда открыта клавиатура */
+body.keyboard-open .bottom-nav {
+  display: none !important;
+}
+
+/* Убираем резервное место под нижнее меню при открытой клавиатуре */
+body.keyboard-open .view-screen {
+  padding-bottom: 0 !important;
+}
+
+/* На всякий случай жёстко прижимаем сам чат */
+body.keyboard-open .view-screen--chat-window {
+  padding-bottom: 0 !important;
+}
+
+/* Гарантируем, что оверлей чата занимает все пространство */
+body.keyboard-open .view-overlay-stack {
+  height: 100%;
+}
+/* --- FIX SWIPE DELETE UI --- */
+.dialog-item-wrapper {
+    position: relative;
+    overflow: hidden;
+    background: transparent;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.dialog-card {
+    position: relative;
+    z-index: 2;
+    background: #0f172a !important;
+    transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+    margin-bottom: 0 !important;
+    border-bottom: none !important;
+}
+
+.dialog-delete-btn {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 100px;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #ef4444;
+    color: white;
+    font-size: 14px;
+    font-weight: 700;
+    border: none;
+    cursor: pointer;
+}
+
+.dialog-card.is-swiped {
+    transform: translateX(-100px);
+}
+
+/* Пытаемся минимизировать системную панель Safari */
+input,
+textarea {
+  font-size: 16px !important;
 }
 
 .subscription-card__unsubscribe {
@@ -4687,4 +4806,87 @@ button.author-inline.pin-detail-card__author-trigger {
 .search-icon {
   position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
   color: var(--text-muted);
+}
+/* --- PREMIUM CHAT UI --- */
+:root {
+    --chat-bg: #0f172a;
+    --chat-accent: #4f46e5;
+    --chat-accent-light: #818cf8;
+    --chat-glass: rgba(255, 255, 255, 0.05);
+}
+
+#chat-window-screen {
+    background: var(--chat-bg) !important;
+}
+
+.chat-messages {
+    padding: 15px !important;
+    display: flex;
+    flex-direction: column;
+    gap: 12px !important;
+    background: var(--chat-bg);
+}
+
+.message { display: flex; width: 100%; margin-bottom: 2px; }
+.message.outgoing { justify-content: flex-end; }
+
+.bubble {
+    max-width: 75%;
+    padding: 10px 14px;
+    position: relative;
+    font-size: 14px;
+    line-height: 1.5;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+/* Входящие сообщения (Glass) */
+.message.incoming .bubble {
+    background: var(--chat-glass);
+    color: #f8fafc;
+    border-radius: 18px 18px 18px 4px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+}
+
+/* Исходящие сообщения (Gradient) */
+.message.outgoing .bubble {
+    background: linear-gradient(135deg, var(--chat-accent) 0%, #4338ca 100%);
+    color: white;
+    border-radius: 18px 18px 4px 18px;
+}
+
+/* Метаданные внутри облачка */
+.bubble-meta {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+    margin-top: 4px;
+    font-size: 10px;
+    opacity: 0.6;
+}
+
+.bubble-status { font-weight: bold; color: #a5b4fc; }
+
+/* Список диалогов (Inbox) */
+.dialog-card {
+    display: flex;
+    align-items: center;
+    padding: 18px 20px !important;
+    gap: 15px;
+    border-bottom: 1px solid var(--chat-glass) !important;
+    transition: background 0.2s ease;
+}
+
+.dialog-card:hover { background: rgba(255, 255, 255, 0.02); }
+
+.dialog-avatar {
+    width: 48px !important; height: 48px !important;
+    background: linear-gradient(135deg, var(--chat-accent) 0%, var(--chat-accent-light) 100%) !important;
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+}
+
+.unread-badge {
+    background: #ef4444 !important;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
 }

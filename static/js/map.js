@@ -61,6 +61,7 @@ let subscriptionsFilterActive = false;
 const subscribedAuthorNicknames = new Set();
 let updateSubscribeButtonState = () => {};
 let currentChatInterlocutor = null;
+let chatNavigationSource = 'map'; // может быть 'map', 'inbox' или 'people'
 
 function clearCategorySelections() {
   activeCategorySlugs.clear();
@@ -139,6 +140,26 @@ let createSheetState = {
 };
 let currentAuthorSheetPinId = null;
 const pinTimerHandles = new Map();
+
+function formatSmartDate(dateString) {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  const now = new Date();
+  const isToday =
+    date.getDate() === now.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday =
+    date.getDate() === yesterday.getDate() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getFullYear() === yesterday.getFullYear();
+  const timeString = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (isToday) return timeString;
+  if (isYesterday) return `Вчера, ${timeString}`;
+  return `${date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}, ${timeString}`;
+}
 
 function formatRemainingTime(secondsLeft) {
   const NORMAL_COLOR = '#9CA3AF';
@@ -1365,15 +1386,18 @@ function bindAuthorPanelSubscribeButton(author) {
 
   const writeBtn = container ? container.querySelector('.author-panel__write-btn') : null;
   if (writeBtn) {
-    const handleWriteClick = (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (!authorPanelCurrentNickname) {
-        showUserToast('Не удалось определить никнейм автора.');
-        return;
-      }
-      openChatWith(authorPanelCurrentNickname);
-    };
+      const handleWriteClick = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!authorPanelCurrentNickname) {
+          showUserToast('Не удалось определить никнейм автора.');
+          return;
+        }
+        const isPeopleTab = document
+          .querySelector('.bottom-nav__item[data-nav-target="people"]')
+          ?.classList.contains('bottom-nav__item--active');
+        openChatWith(authorPanelCurrentNickname, isPeopleTab ? 'people' : 'map');
+      };
     if (writeBtn.__authorWriteHandler) {
       writeBtn.removeEventListener('click', writeBtn.__authorWriteHandler);
     }
@@ -1408,10 +1432,18 @@ function appendChatMessageToContainer(container, message, isOutgoing) {
   }
   const wrapper = document.createElement('div');
   wrapper.className = `message ${isOutgoing ? 'outgoing' : 'incoming'}`;
-  const bubble = document.createElement('div');
-  bubble.className = 'bubble';
-  bubble.textContent = message.content || '';
-  wrapper.appendChild(bubble);
+  
+  const statusIcon = message.is_read ? '✓✓' : '✓';
+  const timeText = typeof formatSmartDate === 'function' ? formatSmartDate(message.created_at) : '';
+  wrapper.innerHTML = `
+    <div class="bubble">
+      <div class="bubble-content">${escapeHtml(message.content || '')}</div>
+      <div class="bubble-meta">
+        <span class="bubble-time">${timeText}</span>
+        ${isOutgoing ? `<span class="bubble-status">${statusIcon}</span>` : ''}
+      </div>
+    </div>
+  `;
   container.appendChild(wrapper);
 }
 
@@ -1432,33 +1464,61 @@ function loadChatHistory(nickname) {
       const messages = Array.isArray(data?.messages) ? data.messages : [];
       const normalizedCurrent = normalizeNicknameForComparison(currentAuthUser?.nickname);
       messages.forEach((message) => {
-        const sender = normalizeNicknameForComparison(message?.sender);
+        const sender = normalizeNicknameForComparison(message?.sender_id || message?.sender);
         const isOutgoing = Boolean(normalizedCurrent && sender && normalizedCurrent === sender);
         appendChatMessageToContainer(container, message, isOutgoing);
       });
-      scrollChatMessagesToBottom(container);
+      requestAnimationFrame(() => {
+        container.scrollTop = container.scrollHeight;
+      });
     })
     .catch((error) => {
       showUserToast(error.message || 'Не удалось загрузить историю чата.');
     });
 }
 
-function openChatWith(nickname) {
+function openChatWith(nickname, source = 'map') {
   const resolved = (nickname || '').trim();
   if (!resolved) {
     return;
   }
+  chatNavigationSource = source;
   currentChatInterlocutor = resolved;
+
   const nameLabel = document.getElementById('chat-interlocutor-name');
   if (nameLabel) {
     nameLabel.textContent = resolved;
   }
-  const authorScreen = getAuthorSheetScreenElement();
-  authorScreen?.classList.remove('view-screen--active');
+
+  // 1. Скрываем все экраны
+  document.querySelectorAll('.view-screen').forEach((screen) => {
+    screen.classList.remove('view-screen--active');
+  });
+
+  // 2. Закрываем шторки
+  if (typeof closeAuthorSheet === 'function') {
+    closeAuthorSheet();
+  }
+  if (typeof closeFilterSheet === 'function') {
+    closeFilterSheet();
+  }
+
+  // 3. Открываем окно чата
   const chatScreen = document.getElementById('chat-window-screen');
-  chatScreen?.classList.add('view-screen--active');
+  if (chatScreen) {
+    chatScreen.classList.add('view-screen--active');
+  }
   const overlayStack = document.querySelector('.view-overlay-stack');
   overlayStack?.classList.add('view-overlay-stack--visible');
+
+  // 4. Синхронизация нижнего меню
+  document.querySelectorAll('.bottom-nav__item').forEach((item) => {
+    item.classList.remove('bottom-nav__item--active');
+    if (item.getAttribute('data-nav-target') === 'chats') {
+      item.classList.add('bottom-nav__item--active');
+    }
+  });
+
   const container = getChatMessagesContainer();
   if (container) {
     container.innerHTML = '';
@@ -1503,18 +1563,20 @@ function sendChatMessage() {
   }
   fetch('/api/messages/send', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+    },
     credentials: 'same-origin',
     body: JSON.stringify({ receiver, content: text }),
   })
     .then(handleJsonResponse)
     .then((data) => {
-      const message = data?.message;
-      const container = getChatMessagesContainer();
-      if (message && container) {
-        appendChatMessageToContainer(container, message, true);
-        scrollChatMessagesToBottom(container);
-      }
+        const message = data?.message;
+        const container = getChatMessagesContainer();
+        if (message && container) {
+          appendChatMessageToContainer(container, message, true);
+          container.scrollTop = container.scrollHeight;
+        }
       if (input) {
         input.value = '';
       }
@@ -1528,6 +1590,135 @@ function sendChatMessage() {
       }
       input?.focus();
     });
+}
+
+async function loadAndRenderInbox() {
+  const container = document.getElementById('inbox-list-container');
+  if (!container) {
+    return;
+  }
+  container.innerHTML = '<div class="chat-loading-placeholder">Загрузка сообщений...</div>';
+  try {
+    const response = await fetch('/api/messages/dialogs', { credentials: 'same-origin' });
+    const data = await response.json();
+    const dialogs = Array.isArray(data?.dialogs) ? data.dialogs : [];
+    if (!dialogs.length) {
+      container.innerHTML = '<div style="padding:40px; text-align:center; color:gray;">У вас пока нет активных диалогов</div>';
+      return;
+    }
+    container.innerHTML = '';
+    dialogs.forEach((chat) => {
+      const interlocutor = (chat.interlocutor || '').trim();
+      const lastMessage = chat.last_message || '';
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'dialog-item-wrapper';
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'dialog-delete-btn';
+      deleteBtn.innerText = 'Удалить';
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (confirm(`Удалить диалог с ${interlocutor}?`)) {
+          deleteChat(interlocutor, wrapper);
+        }
+      };
+
+      const card = document.createElement('div');
+      card.className = 'dialog-card';
+
+      let startX = 0;
+      card.ontouchstart = (e) => { startX = e.touches[0].clientX; };
+      card.ontouchmove = (e) => {
+        let diff = startX - e.touches[0].clientX;
+        if (diff > 30) card.classList.add('is-swiped');
+        if (diff < -30) card.classList.remove('is-swiped');
+      };
+
+      card.onclick = () => {
+        if (card.classList.contains('is-swiped')) {
+          card.classList.remove('is-swiped');
+        } else {
+          openChatWith(interlocutor, 'inbox');
+        }
+      };
+
+      card.innerHTML = `
+        <div class="dialog-avatar">${(interlocutor.charAt(0) || 'A').toUpperCase()}</div>
+        <div class="dialog-info">
+          <div class="dialog-header">
+            <span class="dialog-name">${interlocutor || 'Собеседник'}</span>
+            <span class="dialog-time">${formatSmartDate(chat.created_at)}</span>
+          </div>
+          <div class="dialog-last-msg">${escapeHtml(lastMessage)}</div>
+        </div>
+        ${Number(chat.unread_count || 0) > 0 ? `<div class="unread-badge">${chat.unread_count}</div>` : ''}
+      `;
+
+      wrapper.append(deleteBtn, card);
+      container.appendChild(wrapper);
+    });
+  } catch (error) {
+    console.error('Inbox error:', error);
+    container.innerHTML = '<div style="padding:20px; color:red;">Ошибка загрузки</div>';
+  }
+}
+
+async function deleteChat(nickname, elementToRemove) {
+  try {
+    const response = await fetch(`/api/messages/dialogs/${encodeURIComponent(nickname)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+    });
+    if (response.ok) {
+      elementToRemove.style.transition = 'all 0.4s ease';
+      elementToRemove.style.opacity = '0';
+      elementToRemove.style.transform = 'translateX(-100%)';
+      setTimeout(() => {
+        elementToRemove.style.height = '0';
+        elementToRemove.style.padding = '0';
+        elementToRemove.style.margin = '0';
+        elementToRemove.style.border = 'none';
+        setTimeout(() => {
+          elementToRemove.remove();
+          const containerEl = document.getElementById('inbox-list-container');
+          if (containerEl && containerEl.children.length === 0) {
+            loadAndRenderInbox();
+          }
+        }, 300);
+      }, 200);
+    } else {
+      const err = await response.json().catch(() => ({}));
+      showUserToast(err.message || 'Ошибка при удалении чата');
+    }
+  } catch (error) {
+    console.error('Delete error:', error);
+    showUserToast('Не удалось связаться с сервером');
+  }
+}
+
+async function deleteChat(nickname, elementToRemove) {
+  try {
+    const response = await fetch(`/api/messages/dialogs/${encodeURIComponent(nickname)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+    });
+    if (response.ok) {
+      elementToRemove.style.height = `${elementToRemove.offsetHeight}px`;
+      elementToRemove.style.transition = 'all 0.3s ease';
+      requestAnimationFrame(() => {
+        elementToRemove.style.opacity = '0';
+        elementToRemove.style.height = '0';
+        elementToRemove.style.margin = '0';
+        setTimeout(() => elementToRemove.remove(), 300);
+      });
+    } else {
+      showUserToast('Не удалось удалить чат');
+    }
+  } catch (error) {
+    console.error('Delete chat error:', error);
+    showUserToast('Не удалось удалить чат');
+  }
 }
 
 let isAuthorSheetClosing = false;
@@ -4155,7 +4346,27 @@ window.addEventListener('load', function () {
   const chatBackBtn = document.getElementById('chat-back-btn');
   chatBackBtn?.addEventListener('click', (event) => {
     event.preventDefault();
-    closeChatWindow();
+    const chatWindow = document.getElementById('chat-window-screen');
+    const inboxScreen = document.getElementById('inbox-screen');
+    const overlayStack = document.querySelector('.view-overlay-stack');
+
+    chatWindow?.classList.remove('view-screen--active');
+
+    if (chatNavigationSource === 'inbox' || chatNavigationSource === 'people') {
+      inboxScreen?.classList.add('view-screen--active');
+      document.querySelectorAll('.bottom-nav__item').forEach((item) => {
+        const target = item.getAttribute('data-nav-target');
+        item.classList.toggle('bottom-nav__item--active', target === 'chats');
+      });
+    } else {
+      overlayStack?.classList.remove('view-overlay-stack--visible');
+      document.querySelectorAll('.view-screen').forEach((s) => s.classList.remove('view-screen--active'));
+      document.querySelector('.view-screen[data-view-screen="map"]')?.classList.add('view-screen--active');
+      document.querySelectorAll('.bottom-nav__item').forEach((item) => {
+        const target = item.getAttribute('data-nav-target');
+        item.classList.toggle('bottom-nav__item--active', target === 'map');
+      });
+    }
   });
 
   const chatSendBtn = document.getElementById('chat-send-btn');
@@ -4165,12 +4376,40 @@ window.addEventListener('load', function () {
   });
 
   const chatInput = document.getElementById('chat-message-input');
-  chatInput?.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      sendChatMessage();
-    }
-  });
+  const body = document.body;
+  let temporarilyDisabledInputs = []; // Массив для хранения инпутов
+
+  if (chatInput) {
+    chatInput.addEventListener('focus', () => {
+      body.classList.add('keyboard-open');
+
+      // ХАК ДЛЯ SAFARI: временно отключаем лишние поля, чтобы убрать Input Accessory Bar
+      const otherInputs = document.querySelectorAll('input:not(#chat-message-input), textarea, select');
+      temporarilyDisabledInputs = [];
+      otherInputs.forEach((input) => {
+        if (!input.disabled) {
+          input.disabled = true;
+          temporarilyDisabledInputs.push(input);
+        }
+      });
+    });
+
+    chatInput.addEventListener('blur', () => {
+      body.classList.remove('keyboard-open');
+
+      temporarilyDisabledInputs.forEach((input) => {
+        input.disabled = false;
+      });
+      temporarilyDisabledInputs = [];
+    });
+
+    chatInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendChatMessage();
+      }
+    });
+  }
 
   map = L.map('leaflet-map', {
     zoomControl: true,
@@ -4184,6 +4423,61 @@ window.addEventListener('load', function () {
     if (!isCreationPopup) {
       lastNonCreationPopupCloseAt = Date.now();
     }
+  });
+
+  // Фикс клавиатуры для iOS: точный сдвиг камеры
+  document.addEventListener('focusin', (event) => {
+    if (event.target && event.target.matches('.pin-comments__form-modern input[name="comment"]')) {
+      document.body.classList.add('keyboard-open');
+
+      const popup = event.target.closest('.pin-popup');
+      const commentsList = popup ? popup.querySelector('.pin-comments__list') : null;
+      if (commentsList) {
+        commentsList.scrollTop = commentsList.scrollHeight;
+      }
+
+      setTimeout(() => {
+        if (typeof map === 'undefined' || !map.panBy) {
+          return;
+        }
+
+        const inputRect = event.target.getBoundingClientRect();
+        const viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+        const overlap = inputRect.bottom - viewportHeight + 20;
+
+        if (overlap > 0) {
+          map.panBy([0, overlap], { animate: true });
+        }
+      }, 300);
+    }
+  });
+
+  document.addEventListener('focusout', (event) => {
+    if (event.target && event.target.matches('.pin-comments__form-modern input[name="comment"]')) {
+      document.body.classList.remove('keyboard-open');
+    }
+  });
+
+  const chatNavButtons = document.querySelectorAll('.bottom-nav__item[data-nav-target="chats"]');
+  chatNavButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      const targetView = button.getAttribute('data-nav-target');
+      if (targetView !== 'chats') {
+        document.getElementById('chat-window-screen')?.classList.remove('view-screen--active');
+        document.getElementById('inbox-screen')?.classList.remove('view-screen--active');
+      }
+      loadAndRenderInbox();
+    });
+  });
+
+  document.querySelectorAll('.bottom-nav__item').forEach((item) => {
+    item.addEventListener('click', () => {
+      const targetView = item.getAttribute('data-nav-target');
+      if (targetView && targetView !== 'chats') {
+        document.getElementById('chat-window-screen')?.classList.remove('view-screen--active');
+        document.getElementById('inbox-screen')?.classList.remove('view-screen--active');
+      }
+    });
   });
 
   map.createPane('userAccuracyCirclePane');
@@ -4667,19 +4961,7 @@ document.addEventListener('submit', (event) => {
 });
 
 function attachCommentHandlers(pinId) {
-  const popup = document.querySelector(`.pin-popup[data-pin-id="${pinId}"]`);
-  if (!popup) {
-    return;
-  }
-  const form = popup.querySelector('.pin-comments__form-modern');
-  if (form) {
-    const input = form.querySelector('input[name="comment"]');
-    if (input && isTouchDevice) {
-      input.addEventListener('focus', () => {
-        popup.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      });
-    }
-  }
+  // Глобальный фокус теперь обрабатывается делегированными событиями
 }
 
 function submitComment(pinId, text, form, input) {

@@ -112,26 +112,12 @@
 
   <div class="view-overlay-stack" aria-live="polite">
     <div class="view-screen" data-view-screen="map"></div>
-    <div class="view-screen view-screen--chats" data-view-screen="chats">
-      <div class="view-screen__content">
-        <p class="view-screen__title">Чаты</p>
-        <p class="view-screen__hint">Подключаем список ваших диалогов.</p>
-        <ul class="chat-list">
-          <li class="chat-list__item">
-            <div>
-              <strong>Анна • Знакомства</strong>
-              <p>Последнее сообщение: «Собираемся возле фонтана»</p>
-            </div>
-            <span class="chat-status">online</span>
-          </li>
-          <li class="chat-list__item">
-            <div>
-              <strong>Спорт-чат • Команда</strong>
-              <p>Нужно ещё два человека для посадки</p>
-            </div>
-            <span class="chat-status">online</span>
-          </li>
-        </ul>
+    <div class="view-screen" id="inbox-screen" data-view-screen="chats">
+      <div class="chat-header">
+        <span class="user-name">Сообщения</span>
+      </div>
+      <div class="inbox-container" id="inbox-list-container">
+        <div class="chat-loading-placeholder">Загрузка сообщений...</div>
       </div>
     </div>
     <div class="view-screen view-screen--people" data-view-screen="people">
@@ -394,8 +380,8 @@
         </div>
       </div>
       <div class="chat-messages" id="chat-messages-container"></div>
-      <div class="chat-input-area">
-        <input type="text" id="chat-message-input" placeholder="Написать сообщение...">
+        <div class="chat-input-area">
+        <input type="text" id="chat-message-input" inputmode="text" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="send" placeholder="Написать сообщение...">
         <button class="send-btn" id="chat-send-btn">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
         </button>

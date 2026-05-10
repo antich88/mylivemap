@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import BinaryIO
@@ -999,6 +1000,73 @@ def create_app() -> Flask:
             "is_read": bool(row.get("is_read")),
         }
 
+    def _parse_message_timestamp(value) -> datetime | None:
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str) and value:
+            iso_value = value
+            if iso_value.endswith("Z"):
+                iso_value = f"{iso_value[:-1]}+00:00"
+            try:
+                return datetime.fromisoformat(iso_value)
+            except ValueError:
+                pass
+        return None
+
+    def _normalize_message_timestamp(value) -> datetime | None:
+        parsed = _parse_message_timestamp(value)
+        if not parsed:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _build_dialogs_from_rows(rows: list[dict], curr_nick: str) -> list[dict]:
+        dialogs: dict[str, dict] = {}
+        unread_counts: dict[str, int] = defaultdict(int)
+        for row in rows:
+            sender_raw = str(row.get("sender_id") or "").strip()
+            receiver_raw = str(row.get("receiver_id") or "").strip()
+            sender = sender_raw.lower()
+            receiver = receiver_raw.lower()
+            if not sender and not receiver:
+                continue
+            partner_key = ""
+            partner_label = ""
+            if sender == curr_nick and receiver:
+                partner_key = receiver
+                partner_label = receiver_raw
+            elif receiver == curr_nick and sender:
+                partner_key = sender
+                partner_label = sender_raw
+            if not partner_key:
+                continue
+            timestamp = _normalize_message_timestamp(row.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc)
+            entry = dialogs.get(partner_key)
+            if not entry or timestamp > entry["_timestamp"]:
+                dialogs[partner_key] = {
+                    "interlocutor": partner_label,
+                    "last_message": row.get("content") or "",
+                    "created_at": timestamp.isoformat(),
+                    "_timestamp": timestamp,
+                    "_partner_key": partner_key,
+                }
+            is_read = row.get("is_read")
+            if receiver == curr_nick and not bool(is_read):
+                unread_counts[partner_key] += 1
+        sorted_entries = sorted(dialogs.values(), key=lambda data: data["_timestamp"], reverse=True)
+        results = []
+        for entry in sorted_entries:
+            results.append(
+                {
+                    "interlocutor": entry["interlocutor"],
+                    "last_message": entry["last_message"],
+                    "created_at": entry["created_at"],
+                    "unread_count": unread_counts.get(entry["_partner_key"], 0),
+                }
+            )
+        return results
+
     def _pin_or_404(pin_id: int):
         pin = next((p for p in active_pins() if p.id == pin_id), None)
         if not pin:
@@ -1007,10 +1075,10 @@ def create_app() -> Flask:
 
     @app.route("/api/messages/<path:target_nickname>", methods=["GET"])
     def fetch_messages(target_nickname: str) -> tuple[dict, int]:
-        user = session.get("user")
-        if not user:
+        nickname = session.get("user_nickname")
+        if not nickname:
             return {"error": "Unauthorized"}, 401
-        current_nickname = str(user.get("nickname") or "").strip().lower()
+        curr_nick = nickname.lower()
         target = (target_nickname or "").strip().lower()
         if not target:
             return {"messages": []}, 200
@@ -1024,9 +1092,9 @@ def create_app() -> Flask:
                 sender_id = str(message.get("sender_id") or "").lower()
                 receiver_id = str(message.get("receiver_id") or "").lower()
                 if (
-                    sender_id == current_nickname and receiver_id == target
+                    sender_id == curr_nick and receiver_id == target
                 ) or (
-                    sender_id == target and receiver_id == current_nickname
+                    sender_id == target and receiver_id == curr_nick
                 ):
                     normalized.append(message)
             return {"messages": normalized}, 200
@@ -1045,12 +1113,12 @@ def create_app() -> Flask:
             .where(
                 or_(
                     and_(
-                        messages_table.c.sender_id == current_nickname,
+                        messages_table.c.sender_id == curr_nick,
                         messages_table.c.receiver_id == target,
                     ),
                     and_(
                         messages_table.c.sender_id == target,
-                        messages_table.c.receiver_id == current_nickname,
+                        messages_table.c.receiver_id == curr_nick,
                     ),
                 )
             )
@@ -1063,10 +1131,10 @@ def create_app() -> Flask:
 
     @app.route("/api/messages/send", methods=["POST"])
     def send_message() -> tuple[dict, int]:
-        user = session.get("user")
-        if not user:
+        nickname = session.get("user_nickname")
+        if not nickname:
             return {"error": "Unauthorized"}, 401
-        current_nickname = str(user.get("nickname") or "").strip().lower()
+        curr_nick = nickname.lower()
         payload = request.get_json(silent=True) or {}
         receiver = str(payload.get("receiver") or "").strip().lower()
         content = str(payload.get("content") or "").strip()
@@ -1081,7 +1149,7 @@ def create_app() -> Flask:
             new_id = int(store_data.get("last_id", 0)) + 1
             new_msg = {
                 "id": new_id,
-                "sender_id": current_nickname,
+                "sender_id": curr_nick,
                 "receiver_id": receiver,
                 "content": content,
                 "created_at": datetime.now(timezone.utc).isoformat(),
@@ -1090,7 +1158,7 @@ def create_app() -> Flask:
             store_data.setdefault("messages", []).append(new_msg)
             store_data["last_id"] = new_id
             store.persist(store_data)
-            return new_msg, 200
+            return {"message": new_msg}, 200
 
         from sqlalchemy import insert
 
@@ -1098,7 +1166,7 @@ def create_app() -> Flask:
         insert_stmt = (
             insert(messages_table)
             .values(
-                sender_id=current_nickname,
+                sender_id=curr_nick,
                 receiver_id=receiver,
                 content=content,
                 created_at=timestamp,
@@ -1116,6 +1184,125 @@ def create_app() -> Flask:
         with session_scope() as db_session:
             row = db_session.execute(insert_stmt).mappings().one()
         return {"message": _serialize_message_row(dict(row))}, 200
+
+    @app.route("/api/messages/dialogs/<path:nickname>", methods=["GET", "DELETE"])
+    def fetch_or_delete_dialog(nickname: str) -> tuple[dict, int]:
+        current = session.get("user_nickname")
+        if not current:
+            return {"error": "Unauthorized"}, 401
+        curr_nick = current.lower()
+        target = (nickname or "").strip().lower()
+        if not target:
+            return {"error": "Invalid target"}, 400
+
+        if request.method == "DELETE":
+            if LOCAL_MODE:
+                store = _LOCAL_MESSAGES_STORE
+                if not store:
+                    return {"error": "Storage unavailable"}, 500
+                data = store.snapshot()
+                data["messages"] = [msg for msg in data.get("messages", []) if not (
+                    (str(msg.get("sender_id") or "").lower() == curr_nick and str(msg.get("receiver_id") or "").lower() == target) or
+                    (str(msg.get("sender_id") or "").lower() == target and str(msg.get("receiver_id") or "").lower() == curr_nick)
+                )]
+                store.persist(data)
+                return {"status": "success"}, 200
+            from sqlalchemy import delete, and_, or_
+            stmt = delete(messages_table).where(
+                or_(
+                    and_(
+                        messages_table.c.sender_id == curr_nick,
+                        messages_table.c.receiver_id == target,
+                    ),
+                    and_(
+                        messages_table.c.sender_id == target,
+                        messages_table.c.receiver_id == curr_nick,
+                    ),
+                )
+            )
+            with session_scope() as db_session:
+                db_session.execute(stmt)
+            return {"status": "success"}, 200
+
+        # GET fallthrough uses existing logic with curr_nick
+        target = target or curr_nick
+        from sqlalchemy import asc, and_, or_, select
+        stmt = (
+            select(
+                messages_table.c.id,
+                messages_table.c.sender_id,
+                messages_table.c.receiver_id,
+                messages_table.c.content,
+                messages_table.c.created_at,
+                messages_table.c.is_read,
+            )
+            .where(
+                or_(
+                    and_(
+                        messages_table.c.sender_id == curr_nick,
+                        messages_table.c.receiver_id == target,
+                    ),
+                    and_(
+                        messages_table.c.sender_id == target,
+                        messages_table.c.receiver_id == curr_nick,
+                    ),
+                )
+            )
+            .order_by(asc(messages_table.c.created_at))
+        )
+        with session_scope() as db_session:
+            rows = db_session.execute(stmt).mappings().all()
+        messages = [_serialize_message_row(dict(row)) for row in rows]
+        return {"messages": messages}, 200
+
+    @app.route("/api/messages/dialogs", methods=["GET"])
+    def fetch_dialogs() -> tuple[dict, int]:
+        nickname = session.get("user_nickname")
+        if not nickname:
+            return {"error": "Unauthorized"}, 401
+        curr_nick = nickname.lower()
+
+        if LOCAL_MODE:
+            store = _LOCAL_MESSAGES_STORE
+            if not store:
+                return {"dialogs": []}, 200
+            data = store.snapshot()
+            rows = []
+            for message in data.get("messages", []):
+                rows.append(
+                    {
+                        "sender_id": message.get("sender_id"),
+                        "receiver_id": message.get("receiver_id"),
+                        "content": message.get("content"),
+                        "created_at": message.get("created_at"),
+                        "is_read": message.get("is_read"),
+                    }
+                )
+            dialogs = _build_dialogs_from_rows(rows, curr_nick)
+            return {"dialogs": dialogs}, 200
+
+        from sqlalchemy import or_, select
+
+        stmt = (
+            select(
+                messages_table.c.id,
+                messages_table.c.sender_id,
+                messages_table.c.receiver_id,
+                messages_table.c.content,
+                messages_table.c.created_at,
+                messages_table.c.is_read,
+            )
+            .where(
+                or_(
+                    messages_table.c.sender_id == curr_nick,
+                    messages_table.c.receiver_id == curr_nick,
+                )
+            )
+        )
+        with session_scope() as db_session:
+            rows = db_session.execute(stmt).mappings().all()
+        dialogs = _build_dialogs_from_rows(rows, curr_nick)
+        return {"dialogs": dialogs}, 200
 
     @app.route("/add_comment", methods=["POST"])
     def add_comment_route():
