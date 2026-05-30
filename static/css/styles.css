@@ -1033,17 +1033,19 @@ textarea {
   height: 24px;
   background: transparent;
   border-radius: 50%;
-  border: 1.5px solid #fff;
-  box-shadow: 0 0 0 1px var(--chip-color);
+  border: 2px solid #ffffff !important;
+  box-shadow: 0 0 0 3px var(--chip-color), 0 4px 12px rgba(0, 0, 0, 0.4) !important;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
 }
 
-.marker-status-dot.has-avatar:hover {
-  transform: scale(1.2);
-  transition: transform 0.2s ease-in-out;
+.marker-status-dot.has-avatar:hover,
+.marker-status-dot.has-icon:hover {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 4px var(--chip-color), 0 6px 16px rgba(0, 0, 0, 0.5) !important;
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.2s ease-in-out;
   z-index: 1000;
 }
 
@@ -4889,4 +4891,44 @@ button.author-inline.pin-detail-card__author-trigger {
 .unread-badge {
     background: #ef4444 !important;
     box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+}
+
+/* --- SMART HYBRID MARKERS --- */
+
+/* Стили для кружка с иконкой категории (когда нет аватарки) */
+.marker-status-dot.has-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--chip-color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  border: 2px solid #ffffff !important;
+  box-shadow: 0 0 0 3px var(--chip-color), 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+  flex-shrink: 0;
+}
+
+/* --- СОСТОЯНИЕ ОТДАЛЕНИЯ КАРТЫ (ZOOM < 15) --- */
+.map-zoomed-out .marker-text {
+  display: none !important;
+}
+
+/* Схлопываем плашку до чистого кружка */
+.map-zoomed-out .custom-marker-label {
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.map-zoomed-out .custom-marker-label::after {
+  display: none !important;
+}
+
+/* Легкое увеличение самого кружка для лучшей видимости издалека */
+.map-zoomed-out .marker-status-dot {
+  transform: scale(1.1);
+  transition: transform 0.2s ease;
 }

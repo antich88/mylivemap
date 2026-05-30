@@ -17,6 +17,7 @@ from database import (
     votes_table,
     friendships_table,
     users_table,
+    comments_table,
 )
 
 
@@ -200,7 +201,7 @@ class Pin:
         payload["metadata"] = self.metadata or {}
         payload["category"] = self.category
         payload["user_id"] = self.user_id
-        payload["comments"] = self.comments
+        payload["comments"] = getattr(self, "_preloaded_comments", [])
         if vote_counts is not None:
             likes, dislikes = vote_counts
         else:
@@ -209,11 +210,6 @@ class Pin:
         payload["likes_count"] = likes
         payload["dislikes_count"] = dislikes
         return payload
-
-    @property
-    def comments(self) -> List[Dict[str, str]]:
-        metadata = self.metadata or {}
-        return _normalize_comments(metadata.get("comments"))
 
     @property
     def vote_entries(self) -> List[Dict[str, Any]]:
@@ -324,26 +320,19 @@ def add_comment(pin_id: int, user_id: str, text: str) -> Optional[List[Dict[str,
         _LOCAL_STORE.persist(snapshot)
         return _normalize_comments(payload["comments"])
 
-    from sqlalchemy import select, update
+    from sqlalchemy import insert, select
 
     with session_scope() as session:
-        stmt = select(pins_table.c.metadata, pins_table.c.expires_at).where(pins_table.c.id == pin_id)
-        row = session.execute(stmt).mappings().first()
-        if not row:
-            return None
-        expires_at = _coerce_dt(row.get("expires_at"))
+        stmt = select(pins_table.c.expires_at).where(pins_table.c.id == pin_id)
+        expires_at = session.execute(stmt).scalar_one_or_none()
         if expires_at and expires_at <= datetime.now(timezone.utc):
             return None
-        payload = _ensure_comments_container(_parse_metadata(row.get("metadata")))
-        entry = _make_comment_entry(user_id, cleaned_text)
-        payload["comments"].append(entry)
-        update_stmt = (
-            update(pins_table)
-            .where(pins_table.c.id == pin_id)
-            .values(metadata=json.dumps(payload))
+        insert_stmt = (
+            insert(comments_table)
+            .values(pin_id=pin_id, user_id=user_id, text=cleaned_text, created_at=datetime.now(timezone.utc))
         )
-        session.execute(update_stmt)
-    return _normalize_comments(payload["comments"])
+        session.execute(insert_stmt)
+    return comments_for_pins([pin_id]).get(pin_id, [])
 
 
 def delete_comment(
@@ -376,27 +365,21 @@ def delete_comment(
         _LOCAL_STORE.persist(snapshot)
         return ("ok", _normalize_comments(updated_payload.get("comments", [])))
 
-    from sqlalchemy import select, update
+    from sqlalchemy import delete
 
     with session_scope() as session:
-        stmt = select(pins_table.c.metadata, pins_table.c.expires_at).where(pins_table.c.id == pin_id)
-        row = session.execute(stmt).mappings().first()
-        if not row:
-            return ("pin_not_found", None)
-        expires_at = _coerce_dt(row.get("expires_at"))
-        if expires_at and expires_at <= datetime.now(timezone.utc):
-            return ("pin_not_found", None)
-        payload = _ensure_comments_container(_parse_metadata(row.get("metadata")))
-        status, updated_payload = _remove_comment_entry(payload, comment_id, user_id)
-        if status != "ok":
-            return (status, None)
-        update_stmt = (
-            update(pins_table)
-            .where(pins_table.c.id == pin_id)
-            .values(metadata=json.dumps(updated_payload))
+        delete_stmt = (
+            delete(comments_table)
+            .where(
+                comments_table.c.id == int(comment_id),
+                comments_table.c.pin_id == pin_id,
+                comments_table.c.user_id == user_id,
+            )
         )
-        session.execute(update_stmt)
-    return ("ok", _normalize_comments(updated_payload.get("comments", [])))
+        res = session.execute(delete_stmt)
+        if res.rowcount == 0:
+            return ("not_found", None)
+    return ("ok", comments_for_pins([pin_id]).get(pin_id, []))
 def _mapping_to_pin(row: Mapping[str, Any]) -> Pin:
     raw_metadata = row.get("metadata")
     metadata_payload = _parse_metadata(raw_metadata)
@@ -532,6 +515,52 @@ def vote_counts_for_pins(
             elif val == -1:
                 acc[pid][1] = cnt
         return {pid: (pair[0], pair[1]) for pid, pair in acc.items()}
+
+    if session is None:
+        with session_scope() as scoped_session:
+            return _load(scoped_session)
+    return _load(session)
+
+
+def comments_for_pins(pin_ids: list[int], *, session: object | None = None) -> dict[int, list[dict]]:
+    """Батч-загрузка комментариев для списка пинов одним запросом."""
+    result: dict[int, list[dict]] = {pid: [] for pid in pin_ids}
+    if not pin_ids:
+        return result
+
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        for record in snapshot.get("pins", []):
+            try:
+                pid = int(record.get("id", 0))
+            except (TypeError, ValueError):
+                continue
+            if pid in result:
+                payload = _ensure_comments_container(record.get("metadata") or {})
+                result[pid] = payload.get("comments", [])
+        return result
+
+    from sqlalchemy import select, asc
+
+    def _load(active_session: object):
+        stmt = (
+            select(comments_table)
+            .where(comments_table.c.pin_id.in_(pin_ids))
+            .order_by(asc(comments_table.c.created_at))
+        )
+        rows = active_session.execute(stmt).mappings().all()
+        for row in rows:
+            pid = int(row["pin_id"])
+            result.setdefault(pid, [])
+            result[pid].append(
+                {
+                    "id": str(row["id"]),
+                    "user_id": str(row["user_id"]),
+                    "text": str(row["text"]),
+                    "timestamp": row["created_at"].isoformat() if row["created_at"] else "",
+                }
+            )
+        return result
 
     if session is None:
         with session_scope() as scoped_session:
@@ -1152,3 +1181,42 @@ def reassign_user_id(old_user_id: str, new_user_id: str) -> int:
         )
         result = session.execute(stmt)
         return result.rowcount or 0
+
+
+def count_active_pins_for_users(user_ids: List[str]) -> Dict[str, int]:
+    """Батч-подсчет активных меток для списка пользователей (один запрос к БД)."""
+    if not user_ids:
+        return {}
+
+    normalized_ids = [uid.lower() for uid in user_ids if uid]
+    if not normalized_ids:
+        return {}
+
+    now_iso = datetime.now(timezone.utc)
+
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        counts = {uid: 0 for uid in normalized_ids}
+        for record in snapshot.get("pins", []):
+            uid = str(record.get("user_id") or "").lower()
+            if uid in counts and _pin_is_active(record, now_iso):
+                counts[uid] += 1
+        return counts
+
+    from sqlalchemy import func, select
+
+    with session_scope() as session:
+        stmt = (
+            select(
+                func.lower(pins_table.c.user_id).label("user_id"),
+                func.count().label("cnt"),
+            )
+            .where(
+                func.lower(pins_table.c.user_id).in_(normalized_ids),
+                (pins_table.c.expires_at.is_(None) | (pins_table.c.expires_at > now_iso)),
+            )
+            .group_by(func.lower(pins_table.c.user_id))
+        )
+        rows = session.execute(stmt).all()
+
+    return {str(row.user_id): int(row.cnt) for row in rows}

@@ -92,6 +92,8 @@ if LOCAL_MODE:
     friendships_table = None  # type: ignore
     user_subscriptions_table = None  # type: ignore
     messages_table = None  # type: ignore
+    comments_table = None  # type: ignore
+    comments_table = None  # type: ignore
 
 else:
     from sqlalchemy import (
@@ -247,6 +249,16 @@ else:
         Column("is_read", Integer, nullable=False, server_default=text("0"), default=0),
     )
 
+    comments_table = Table(
+        "comments",
+        metadata,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("pin_id", Integer, ForeignKey("pins.id", ondelete="CASCADE"), nullable=False),
+        Column("user_id", String(255), ForeignKey("users.nickname", ondelete="CASCADE", onupdate="CASCADE"), nullable=False),
+        Column("text", Text, nullable=False),
+        Column("created_at", DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)),
+    )
+
 
     def init_schema() -> None:
         metadata.create_all(ENGINE)
@@ -293,6 +305,10 @@ else:
         if not inspector.has_table("messages"):
             with ENGINE.begin() as conn:
                 messages_table.create(conn)
+
+        if not inspector.has_table("comments"):
+            with ENGINE.begin() as conn:
+                comments_table.create(conn)
 
         # pins: ensure image_url
         if "pins" in table_names:

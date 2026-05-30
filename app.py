@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, session, url_for
+from flask_socketio import SocketIO, join_room, leave_room
 from werkzeug.utils import secure_filename
 
 try:
@@ -74,7 +75,9 @@ from database import (
 from models import (
     active_pins,
     add_comment,
+    comments_for_pins,
     count_active_pins_for_user,
+    count_active_pins_for_users,
     create_pin,
     delete_comment,
     delete_pin,
@@ -755,6 +758,7 @@ def create_app() -> Flask:
             # Устраняет N+1 (было 2N запросов в vote_counts_for_pin).
             pin_ids = [p.id for p in pins if p.id is not None]
             vote_counts_map = vote_counts_for_pins(pin_ids)
+            comments_map = comments_for_pins(pin_ids)
 
             # Батч-проверка "активен ли автор за последние 7 дней" — один SQL вместо N
             unique_user_ids = {p.user_id for p in pins if p.user_id}
@@ -848,6 +852,7 @@ def create_app() -> Flask:
             response_payload = []
             for pin in pins:
                 counts = vote_counts_map.get(pin.id, (0, 0))
+                pin._preloaded_comments = comments_map.get(pin.id, [])
                 payload = pin.to_dict(vote_counts=counts)
                 user_id = pin.user_id
                 if user_id:
@@ -1158,6 +1163,17 @@ def create_app() -> Flask:
             store_data.setdefault("messages", []).append(new_msg)
             store_data["last_id"] = new_id
             store.persist(store_data)
+
+            emit_payload = {
+                "id": new_id,
+                "sender": curr_nick,
+                "receiver": receiver,
+                "content": content,
+                "created_at": new_msg["created_at"],
+                "is_read": False,
+            }
+            socketio.emit('new_message', {'message': emit_payload}, room=f"user_{receiver}")
+            socketio.emit('new_message', {'message': emit_payload}, room=f"user_{curr_nick}")
             return {"message": new_msg}, 200
 
         from sqlalchemy import insert
@@ -1183,7 +1199,57 @@ def create_app() -> Flask:
         )
         with session_scope() as db_session:
             row = db_session.execute(insert_stmt).mappings().one()
-        return {"message": _serialize_message_row(dict(row))}, 200
+        msg_payload = _serialize_message_row(dict(row))
+        socketio.emit('new_message', {'message': msg_payload}, room=f"user_{receiver}")
+        socketio.emit('new_message', {'message': msg_payload}, room=f"user_{curr_nick}")
+        return {"message": msg_payload}, 200
+
+
+
+    @app.route("/api/messages/read", methods=["POST"])
+    def mark_messages_read() -> tuple[dict, int]:
+        nickname = session.get("user_nickname")
+        if not nickname:
+            return {"error": "Unauthorized"}, 401
+        curr_nick = nickname.lower()
+        payload = request.get_json(silent=True) or {}
+        partner = str(payload.get("partner") or payload.get("sender") or "").strip().lower()
+        if not partner:
+            return {"error": "Invalid partner"}, 400
+        updated = 0
+        if LOCAL_MODE:
+            store = _LOCAL_MESSAGES_STORE
+            if not store:
+                return {"error": "Storage unavailable"}, 500
+            data = store.snapshot()
+            messages = data.setdefault("messages", [])
+            for message in messages:
+                sender = str(message.get("sender_id") or "").lower()
+                receiver = str(message.get("receiver_id") or "").lower()
+                if (
+                    sender == partner and
+                    receiver == curr_nick and
+                    not bool(message.get("is_read"))
+                ):
+                    message["is_read"] = 1
+                    updated += 1
+            store.persist(data)
+            return {"updated": updated}, 200
+        from sqlalchemy import update
+
+        stmt = (
+            update(messages_table)
+            .where(
+                messages_table.c.receiver_id == curr_nick,
+                messages_table.c.sender_id == partner,
+                messages_table.c.is_read == 0,
+            )
+            .values(is_read=1)
+        )
+        with session_scope() as db_session:
+            result = db_session.execute(stmt)
+            updated = result.rowcount or 0
+        return {"updated": updated}, 200
 
     @app.route("/api/messages/dialogs/<path:nickname>", methods=["GET", "DELETE"])
     def fetch_or_delete_dialog(nickname: str) -> tuple[dict, int]:
@@ -1317,7 +1383,8 @@ def create_app() -> Flask:
         comments = add_comment(marker_id, user["nickname"], text)
         if comments is None:
             abort(404, description="Метка не найдена или устарела.")
-        return jsonify({"comments": comments})
+        socketio.emit('comments_updated', {'marker_id': marker_id, 'comments': comments}, room=str(marker_id))
+        return jsonify({"status": "ok", "comments": comments}), 200
 
     @app.route("/delete_comment", methods=["DELETE"])
     def delete_comment_route():
@@ -1334,6 +1401,7 @@ def create_app() -> Flask:
             abort(404, description="Комментарий не найден.")
         if status == "forbidden":
             abort(403, description="Можно удалить только свой комментарий.")
+        socketio.emit('comments_updated', {'marker_id': marker_id, 'comments': comments or []}, room=str(marker_id))
         return jsonify({"comments": comments or []})
 
     @app.route("/get_comments", methods=["GET"])
@@ -1341,10 +1409,7 @@ def create_app() -> Flask:
         marker_id = request.args.get("marker_id", type=int)
         if marker_id is None:
             abort(400, description="Некорректный идентификатор метки.")
-        pin = get_pin_by_id(marker_id)
-        if not pin:
-            abort(404, description="Метка не найдена или устарела.")
-        return jsonify({"comments": pin.comments})
+        return jsonify({"comments": comments_for_pins([marker_id]).get(marker_id, [])})
 
     @app.route("/api/pins/<int:pin_id>", methods=["GET", "DELETE"])
     def manage_pin(pin_id: int) -> tuple[dict, int]:
@@ -1443,6 +1508,9 @@ def create_app() -> Flask:
                 payload = []
             subscriptions_payload = []
             unique_nicknames = {n.lower() for n in payload if n}
+
+            active_pins_counts = count_active_pins_for_users(list(unique_nicknames))
+
             if LOCAL_MODE:
                 for nickname in payload:
                     if not nickname:
@@ -1451,7 +1519,7 @@ def create_app() -> Flask:
                         author_state = _build_user_state(nickname)
                     except Exception:
                         continue
-                    pin_count = len([pin for pin in active_pins() if (pin.user_id or "").lower() == nickname.lower()])
+                    pin_count = active_pins_counts.get(nickname.lower(), 0)
                     subscriptions_payload.append(
                         {
                             "nickname": author_state.get("nickname"),
@@ -1487,7 +1555,7 @@ def create_app() -> Flask:
                     serialized = _serialize_profile(profile_dict)
                 points = profile_dict.get("reputation_points", 0) if profile_dict else 0
                 rep_level = calculate_reputation_level(points)
-                pin_count = len([pin for pin in active_pins() if (pin.user_id or "").lower() == nickname.lower()])
+                pin_count = active_pins_counts.get(nickname.lower(), 0)
                 subscriptions_payload.append(
                     {
                         "nickname": nickname,
@@ -1657,8 +1725,29 @@ def create_app() -> Flask:
 
 
 app = create_app()
+app.config['SECRET_KEY'] = 'your_secret_key_here'
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+
+@socketio.on('join_pin')
+def on_join_pin(data):
+    pin_id = str(data.get('pin_id'))
+    join_room(pin_id)
+
+
+@socketio.on('leave_pin')
+def on_leave_pin(data):
+    pin_id = str(data.get('pin_id'))
+    leave_room(pin_id)
+
+
+@socketio.on('join_user_room')
+def on_join_user_room(data):
+    nickname = str(data.get('nickname') or '').strip().lower()
+    if nickname:
+        join_room(f"user_{nickname}")
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    socketio.run(app, host="0.0.0.0", port=port, debug=False)

@@ -10,7 +10,6 @@ const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 const LIVE_MAP_USER_ID_STORAGE_KEY = 'liveMapUserId';
 const SHOW_ALL_MODES = { ALL: 'all', OFF: 'off' };
 const AUTO_REFRESH_INTERVAL = 60_000;
-const COMMENT_POLL_INTERVAL = 6_000;
 const USER_MARKER_LIMIT = 5;
 const baseStrokeOpacity = 0.9;
 const baseFillOpacity = 0.6;
@@ -119,7 +118,6 @@ let showAllBtn = null;
 let refreshBtn = null;
 let autoRefreshTimerId = null;
 let refreshInFlightPromise = null;
-const commentPollers = new Map();
 const commentStateCache = new Map();
 const commentScrollState = new Map();
 let categoryChips = [];
@@ -139,7 +137,84 @@ let createSheetState = {
   selectedSubcategorySlug: null,
 };
 let currentAuthorSheetPinId = null;
+let currentCommentRoomPinId = null;
 const pinTimerHandles = new Map();
+const socket = typeof io === 'function' ? io() : null;
+if (socket) {
+  socket.on('comments_updated', ({ marker_id: markerId, comments }) => {
+    if (!markerId || Number(markerId) !== Number(currentCommentRoomPinId)) {
+      return;
+    }
+    if (!Array.isArray(comments)) {
+      return;
+    }
+    applyCommentsUpdate(Number(markerId), comments, { animateNew: true });
+    autoScrollComments(Number(markerId));
+  });
+
+  socket.on('new_message', (data) => {
+    const msg = data?.message;
+    if (!msg || !currentAuthUser) {
+      return;
+    }
+    const myNick = normalizeNicknameForComparison(currentAuthUser.nickname);
+    const sender = normalizeNicknameForComparison(msg.sender);
+    const receiver = normalizeNicknameForComparison(msg.receiver);
+    const isFromMe = myNick === sender;
+    const partner = isFromMe ? receiver : sender;
+    if (!partner) {
+      return;
+    }
+    const isChatOpenWithPartner = currentChatInterlocutor && normalizeNicknameForComparison(currentChatInterlocutor) === partner;
+    if (isChatOpenWithPartner) {
+      const container = getChatMessagesContainer();
+      if (container) {
+        const existing = container.querySelector(`.message[data-msg-id="${msg.id}"]`);
+        if (!existing) {
+          appendChatMessageToContainer(container, msg, isFromMe);
+          const lastAppended = container.lastElementChild;
+          if (lastAppended) {
+            lastAppended.dataset.msgId = msg.id;
+          }
+          requestAnimationFrame(() => scrollChatMessagesToBottom(container));
+        }
+      }
+      return;
+    }
+    const inboxScreen = document.getElementById('inbox-screen');
+    const isInboxVisible = inboxScreen?.classList.contains('view-screen--active');
+    if (isInboxVisible) {
+      loadAndRenderInbox();
+    } else if (!isFromMe) {
+      showUserToast(`Новое сообщение от ${msg.sender}`);
+    }
+  });
+}
+
+function autoScrollComments(pinId) {
+  scrollCommentsToBottom(pinId, { force: true, smooth: true });
+}
+
+function joinCommentRoom(pinId) {
+  if (!socket || !pinId) {
+    return;
+  }
+  if (currentCommentRoomPinId && currentCommentRoomPinId !== pinId) {
+    leaveCommentRoom(currentCommentRoomPinId);
+  }
+  socket.emit('join_pin', { pin_id: pinId });
+  currentCommentRoomPinId = pinId;
+}
+
+function leaveCommentRoom(pinId) {
+  if (!socket || !pinId) {
+    return;
+  }
+  socket.emit('leave_pin', { pin_id: pinId });
+  if (currentCommentRoomPinId === pinId) {
+    currentCommentRoomPinId = null;
+  }
+}
 
 function formatSmartDate(dateString) {
   if (!dateString) return '';
@@ -1482,6 +1557,7 @@ function openChatWith(nickname, source = 'map') {
   if (!resolved) {
     return;
   }
+  markMessagesRead(resolved);
   chatNavigationSource = source;
   currentChatInterlocutor = resolved;
 
@@ -1575,6 +1651,10 @@ function sendChatMessage() {
         const container = getChatMessagesContainer();
         if (message && container) {
           appendChatMessageToContainer(container, message, true);
+          const lastAppended = container.lastElementChild;
+          if (lastAppended) {
+            lastAppended.dataset.msgId = message.id;
+          }
           container.scrollTop = container.scrollHeight;
         }
       if (input) {
@@ -1731,7 +1811,7 @@ function closeAuthorSheet() {
   const content = document.getElementById('author-sheet-content');
 
   if (currentAuthorSheetPinId) {
-    stopCommentPolling(currentAuthorSheetPinId);
+    leaveCommentRoom(currentAuthorSheetPinId);
     currentAuthorSheetPinId = null;
   }
 
@@ -1799,7 +1879,7 @@ function renderAuthorSheetForPin(pin) {
   content.innerHTML = createPopupContent(pin);
   attachCommentHandlers(pin.id);
   initializeCommentsView(pin.id, pin.comments || []);
-  startCommentPolling(pin.id);
+  joinCommentRoom(pin.id);
   attachAuthorPopupHandlers({ getElement: () => content }, pin);
   initializePinTimer(pin);
 
@@ -2515,45 +2595,8 @@ function isPopupStillOpen(pinId) {
 }
 
 function pollComments(pinId) {
-  if (!pinId) {
-    return Promise.resolve();
-  }
-  return fetch(`/get_comments?marker_id=${pinId}`, { credentials: 'same-origin' })
-    .then(handleJsonResponse)
-    .then((payload) => {
-      const comments = payload?.comments || [];
-      if (!isPopupStillOpen(pinId)) {
-        stopCommentPolling(pinId);
-        return;
-      }
-      if (!shouldUpdateComments(pinId, comments)) {
-        return;
-      }
-      applyCommentsUpdate(pinId, comments, { animateNew: true });
-    })
-    .catch((error) => {
-      console.error('Не удалось получить комментарии', error);
-    });
-}
-
-function startCommentPolling(pinId) {
-  if (!pinId) {
-    return;
-  }
-  stopCommentPolling(pinId);
-  pollComments(pinId);
-  const timerId = setInterval(() => {
-    pollComments(pinId);
-  }, COMMENT_POLL_INTERVAL);
-  commentPollers.set(pinId, timerId);
-}
-
-function stopCommentPolling(pinId) {
-  const timerId = commentPollers.get(pinId);
-  if (timerId) {
-    clearInterval(timerId);
-    commentPollers.delete(pinId);
-  }
+  console.warn('pollComments invoked but polling is disabled; use Socket.IO events.');
+  return Promise.resolve();
 }
 
 function renderCommentForm(currentNickname, pinId) {
@@ -3346,6 +3389,9 @@ function renderAuthState(message = '') {
   renderActivePinsList();
   bindActivePinsActions();
   if (authenticated) {
+    if (socket && currentAuthUser?.nickname) {
+      socket.emit('join_user_room', { nickname: currentAuthUser.nickname });
+    }
     fetchSubscriptions();
     startActivePinsClock();
     if (justLoggedIn) {
@@ -4154,20 +4200,20 @@ function handleCreateSheetSubmit(event) {
 function createMarkerLabelIcon(pin) {
   const category = getCategoryBySlug(pin.category_slug);
   const categoryColor = category?.color || pin.color || '#ffffff';
+  const categoryIcon = category?.icon || '';
   const markerTitle = escapeHtml(pin.title || pin.nickname || 'Метка');
 
-  // Получаем прозрачность на основе оставшегося времени (максимум 0.9, минимум 0.2)
   const opacities = computeOpacityFromTTL(pin.ttl_seconds);
   const currentOpacity = opacities.strokeOpacity;
 
   const avatarUrl = pin.author?.avatar_url;
   const avatarMarkup = avatarUrl
     ? `<img src="${avatarUrl}" class="marker-avatar-img" alt="" loading="lazy" onerror="this.parentNode.classList.remove('has-avatar'); this.remove();">`
-    : '';
+    : categoryIcon;
 
   const markerHtml = `
     <div class="custom-marker-label" style="--chip-color: ${categoryColor}; opacity: ${currentOpacity};">
-      <span class="marker-status-dot ${avatarUrl ? 'has-avatar' : ''}" aria-hidden="true">
+      <span class="marker-status-dot ${avatarUrl ? 'has-avatar' : 'has-icon'}" aria-hidden="true">
         ${avatarMarkup}
       </span>
       <span class="marker-text">${markerTitle}</span>
@@ -4370,10 +4416,22 @@ window.addEventListener('load', function () {
   });
 
   const chatSendBtn = document.getElementById('chat-send-btn');
-  chatSendBtn?.addEventListener('click', (event) => {
-    event.preventDefault();
-    sendChatMessage();
-  });
+  if (chatSendBtn) {
+    // Используем pointerdown — он заменяет и мышь, и тач-события, срабатывая моментально
+    chatSendBtn.addEventListener('pointerdown', (event) => {
+      // Блокируем потерю фокуса у поля ввода (чтобы меню не прыгало)
+      event.preventDefault(); 
+      
+      // Сразу отправляем сообщение в момент касания
+      sendChatMessage();
+      
+      // Страховка: принудительно возвращаем фокус, если он вдруг сбился
+      const chatInput = document.getElementById('chat-message-input');
+      if (chatInput) {
+        chatInput.focus();
+      }
+    });
+  }
 
   const chatInput = document.getElementById('chat-message-input');
   const body = document.body;
@@ -4415,6 +4473,20 @@ window.addEventListener('load', function () {
     zoomControl: true,
     attributionControl: false,
   }).setView([defaults.lat, defaults.lng], defaults.zoom);
+
+  // Логика скрытия названий при отдалении карты
+  function toggleZoomClass() {
+    const mapContainer = document.getElementById('leaflet-map');
+    if (map && mapContainer) {
+      if (map.getZoom() < 15) {
+        mapContainer.classList.add('map-zoomed-out');
+      } else {
+        mapContainer.classList.remove('map-zoomed-out');
+      }
+    }
+  }
+  map.on('zoomend', toggleZoomClass);
+  toggleZoomClass();
 
   map.on('popupopen', (event) => applyPopupFadeEffect(event.popup));
   map.on('popupclose', (event) => {
@@ -5149,5 +5221,31 @@ function updateProfileRating(value) {
   const ratingEl = document.querySelector('[data-profile-rating]');
   if (ratingEl) {
     ratingEl.textContent = Number.isFinite(value) && value !== null ? value : '—';
+  }
+}
+async function markMessagesRead(partner) {
+  if (!partner) {
+    return;
+  }
+  try {
+    const response = await fetch('/api/messages/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ partner }),
+    });
+    if (response.ok) {
+      const container = document.getElementById('inbox-list-container');
+      if (container) {
+        const badge = container.querySelector(`[data-dialog-nick="${partner}"] .unread-badge`);
+        if (badge) {
+          badge.remove();
+        } else {
+          loadAndRenderInbox();
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Failed to mark messages read', error);
   }
 }

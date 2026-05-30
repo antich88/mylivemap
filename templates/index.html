@@ -17,6 +17,12 @@
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
     />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon-96x96.png') }}" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon.svg') }}" />
+    <link rel="shortcut icon" href="{{ url_for('static', filename='img/favicon.ico') }}" />
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}" />
+    <meta name="apple-mobile-web-app-title" content="Mylivemap" />
+    <link rel="manifest" href="{{ url_for('static', filename='img/site.webmanifest') }}" />
   </head>
   <body>
     {% set gender_labels = {'M': 'Мужской', 'F': 'Женский'} %}
@@ -502,6 +508,7 @@
     {{ categories | tojson | safe }}
   </script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js" defer></script>
   <script src="{{ url_for('static', filename='js/map.js') }}" defer></script>
   <script>
     document.addEventListener('DOMContentLoaded', () => {
