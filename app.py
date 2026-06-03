@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import eventlet
+eventlet.monkey_patch()  # Важно: патч должен идти в самом верху для стабильных веб-сокетов
+
 import json
 import os
 import secrets
@@ -10,7 +13,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, session, url_for
-from flask_socketio import SocketIO, join_room, leave_room
+from flask_socketio import SocketIO, join_room, leave_room, emit
 from werkzeug.utils import secure_filename
 
 try:
@@ -21,6 +24,7 @@ except ImportError:  # pragma: no cover - optional dependency
     cloudinary = None
     cloudinary_uploader = None
     cloudinary_url_for = None
+
 from auth_store import (
     NicknameAlreadyExistsError,
     add_user_subscription,
@@ -206,7 +210,8 @@ def create_app() -> Flask:
             "subscriptions": [],
             "followers_count": 0,
         }
-        if LOCAL_MODE:
+        # На сервере форсируем работу с реальной СУБД, игнорируя LOCAL_MODE для стейта
+        if LOCAL_MODE and not os.getenv("DATABASE_URL"):
             base["rating_total"] = get_user_rating_total(nickname)
             reputation = get_reputation_state(nickname)
             base.update(reputation)
@@ -326,10 +331,6 @@ def create_app() -> Flask:
         return base
 
     def _build_author_preview(nickname: str) -> dict:
-        """Лёгкая версия профиля автора для попапа метки.
-        Вытаскивает rating + profile одним запросом вместо 4 отдельных.
-        Не тянет subscriptions (для попапа не нужны)."""
-
         base = {
             "nickname": nickname,
             "age": None,
@@ -342,7 +343,7 @@ def create_app() -> Flask:
             "is_verified": False,
         }
 
-        if LOCAL_MODE:
+        if LOCAL_MODE and not os.getenv("DATABASE_URL"):
             return _build_user_state(nickname)
 
         from sqlalchemy import func, select
@@ -429,8 +430,6 @@ def create_app() -> Flask:
                 overwrite=True,
                 use_filename=False,
                 unique_filename=False,
-                # Сохраняем оригинальное разрешение до 3000px,
-                # но радикально снижаем вес за счет умных форматов
                 width=3000,
                 height=3000,
                 crop="limit",
@@ -438,13 +437,10 @@ def create_app() -> Flask:
                 quality="auto"
             )
             secure_url = str(upload_result.get("secure_url") or "").strip()
-            print(f"DEBUG CLOUDINARY SUCCESS: {secure_url}")
             if secure_url:
                 return secure_url
-            print("DEBUG CLOUDINARY WARNING: secure_url отсутствует, отклоняем запись")
             return None
         except Exception as exc:  # pragma: no cover
-            print(f"DEBUG: Cloudinary Error: {exc}")
             app.logger.warning("Cloudinary upload failed for %s: %s", unique_name, exc)
             return None
 
@@ -494,8 +490,7 @@ def create_app() -> Flask:
         current_user = current_user_payload()
         share_meta = {
             "title": SHARING_META["site_name"],
-            "description": "Живая карта интересов с категориями "
-            " по Мото, Спорт, Рыбалка и Знакомства",
+            "description": "Живая карта интересов с категориями по Мото, Спорт, Рыбалка и Знакомства",
             "image": SHARING_META["default_image"],
             "url": request.url,
         }
@@ -582,22 +577,13 @@ def create_app() -> Flask:
         except ValueError as exc:
             return {"message": str(exc)}, 400
         except Exception as exc:  # pragma: no cover
-            app.logger.exception(
-                "Nickname update failed for nickname=%s: %s",
-                current_user["nickname"],
-                exc,
-            )
+            app.logger.exception("Nickname update failed for nickname=%s: %s", current_user["nickname"], exc)
             return {"message": "Не удалось обновить имя. Попробуйте позже."}, 500
 
         try:
             reassign_user_id(current_user["nickname"], updated_user.nickname)
         except Exception as exc:  # pragma: no cover
-            app.logger.exception(
-                "Failed to propagate nickname change from %s to %s: %s",
-                current_user["nickname"],
-                updated_user.nickname,
-                exc,
-            )
+            app.logger.exception("Failed to propagate nickname change from %s to %s: %s", current_user["nickname"], updated_user.nickname, exc)
             return {"message": "Не удалось применить новое имя во всех разделах."}, 500
 
         session["user_nickname"] = updated_user.nickname
@@ -649,22 +635,13 @@ def create_app() -> Flask:
             except ValueError as exc:
                 return {"message": str(exc)}, 400
             except Exception as exc:  # pragma: no cover
-                app.logger.exception(
-                    "Nickname update failed for nickname=%s: %s",
-                    original_nickname,
-                    exc,
-                )
+                app.logger.exception("Nickname update failed for nickname=%s: %s", original_nickname, exc)
                 return {"message": "Не удалось обновить имя. Попробуйте позже."}, 500
 
             try:
                 reassign_user_id(original_nickname, updated_user.nickname)
             except Exception as exc:  # pragma: no cover
-                app.logger.exception(
-                    "Failed to propagate nickname change from %s to %s: %s",
-                    original_nickname,
-                    updated_user.nickname,
-                    exc,
-                )
+                app.logger.exception("Failed to propagate nickname change from %s to %s: %s", original_nickname, updated_user.nickname, exc)
                 return {"message": "Не удалось применить новое имя во всех разделах."}, 500
 
             session["user_nickname"] = updated_user.nickname
@@ -710,7 +687,6 @@ def create_app() -> Flask:
         cloudinary_available = CLOUDINARY_ENABLED and cloudinary_ready and cloudinary_uploader
         if cloudinary_available:
             file.stream.seek(0)
-            print("--- ATTEMPTING CLOUDINARY UPLOAD ---")
             cloudinary_tagged = _upload_to_cloudinary(file.stream, unique_name)
             if not cloudinary_tagged:
                 return {"message": "Не удалось загрузить аватар в Cloudinary."}, 500
@@ -754,20 +730,16 @@ def create_app() -> Flask:
             allowed = categories.split(",") if categories else None
             pins = active_pins(allowed_subcategories=allowed, rating_threshold=threshold)
 
-            # Батч-подсчёт голосов одним SQL-запросом для всех пинов сразу.
-            # Устраняет N+1 (было 2N запросов в vote_counts_for_pin).
             pin_ids = [p.id for p in pins if p.id is not None]
             vote_counts_map = vote_counts_for_pins(pin_ids)
             comments_map = comments_for_pins(pin_ids)
-
-            # Батч-проверка "активен ли автор за последние 7 дней" — один SQL вместо N
             unique_user_ids = {p.user_id for p in pins if p.user_id}
             active_authors_set = active_authors_recently(unique_user_ids)
 
             authors_cache: dict[str, dict] = {}
 
             if unique_user_ids:
-                if LOCAL_MODE:
+                if LOCAL_MODE and not os.getenv("DATABASE_URL"):
                     for user_id in unique_user_ids:
                         authors_cache[user_id] = _build_author_preview(user_id)
                 else:
@@ -849,6 +821,7 @@ def create_app() -> Flask:
                             base["age"] = serialized.get("age")
                             base["gender"] = serialized.get("gender")
                             base["avatar_url"] = serialized.get("avatar_url")
+            
             response_payload = []
             for pin in pins:
                 counts = vote_counts_map.get(pin.id, (0, 0))
@@ -951,9 +924,6 @@ def create_app() -> Flask:
             }
         else:
             payload["author"] = None
-        print(f"pin fetch requested: pin_id={pin_id} rating={payload.get('rating')}", flush=True)
-        print(f"DEBUG: Pin data sent to UI: pin_id={pin_id} rating={payload.get('rating')}", flush=True)
-        print(f"ОТПРАВКА НА ФРОНТ: ID {pin_id}, Rating {pin.rating}", flush=True)
         return jsonify(payload)
 
     @app.route("/api/authors/<path:nickname>", methods=["GET"])
@@ -972,25 +942,6 @@ def create_app() -> Flask:
         if not user:
             abort(401, description="Нужно войти в аккаунт.")
         return user
-
-    def _resolve_session_user_nickname() -> str | None:
-        user_payload = session.get("user")
-        nickname = None
-        if isinstance(user_payload, str):
-            nickname = user_payload
-        elif isinstance(user_payload, dict):
-            nickname = user_payload.get("nickname")
-        if not nickname:
-            nickname = session.get("user_nickname")
-        if nickname:
-            return str(nickname).strip()
-        return None
-
-    def _require_session_user_nickname() -> str:
-        nickname = _resolve_session_user_nickname()
-        if not nickname:
-            abort(401, description="Нужно войти в аккаунт.")
-        return nickname
 
     def _serialize_message_row(row: dict) -> dict:
         created_at = row.get("created_at")
@@ -1072,12 +1023,6 @@ def create_app() -> Flask:
             )
         return results
 
-    def _pin_or_404(pin_id: int):
-        pin = next((p for p in active_pins() if p.id == pin_id), None)
-        if not pin:
-            abort(404)
-        return pin
-
     @app.route("/api/messages/<path:target_nickname>", methods=["GET"])
     def fetch_messages(target_nickname: str) -> tuple[dict, int]:
         nickname = session.get("user_nickname")
@@ -1087,7 +1032,7 @@ def create_app() -> Flask:
         target = (target_nickname or "").strip().lower()
         if not target:
             return {"messages": []}, 200
-        if LOCAL_MODE:
+        if LOCAL_MODE and not os.getenv("DATABASE_URL"):
             store = _LOCAL_MESSAGES_STORE
             if not store:
                 return {"messages": []}, 200
@@ -1146,7 +1091,7 @@ def create_app() -> Flask:
         if not receiver or not content:
             return {"error": "Invalid data"}, 400
 
-        if LOCAL_MODE:
+        if LOCAL_MODE and not os.getenv("DATABASE_URL"):
             store = _LOCAL_MESSAGES_STORE
             if not store:
                 return {"error": "Storage unavailable"}, 500
@@ -1204,8 +1149,6 @@ def create_app() -> Flask:
         socketio.emit('new_message', {'message': msg_payload}, room=f"user_{curr_nick}")
         return {"message": msg_payload}, 200
 
-
-
     @app.route("/api/messages/read", methods=["POST"])
     def mark_messages_read() -> tuple[dict, int]:
         nickname = session.get("user_nickname")
@@ -1217,7 +1160,7 @@ def create_app() -> Flask:
         if not partner:
             return {"error": "Invalid partner"}, 400
         updated = 0
-        if LOCAL_MODE:
+        if LOCAL_MODE and not os.getenv("DATABASE_URL"):
             store = _LOCAL_MESSAGES_STORE
             if not store:
                 return {"error": "Storage unavailable"}, 500
@@ -1234,6 +1177,8 @@ def create_app() -> Flask:
                     message["is_read"] = 1
                     updated += 1
             store.persist(data)
+            if updated > 0:
+                socketio.emit('messages_read', {'reader': curr_nick}, room=f"user_{partner}")
             return {"updated": updated}, 200
         from sqlalchemy import update
 
@@ -1249,6 +1194,8 @@ def create_app() -> Flask:
         with session_scope() as db_session:
             result = db_session.execute(stmt)
             updated = result.rowcount or 0
+        if updated > 0:
+            socketio.emit('messages_read', {'reader': curr_nick}, room=f"user_{partner}")
         return {"updated": updated}, 200
 
     @app.route("/api/messages/dialogs/<path:nickname>", methods=["GET", "DELETE"])
@@ -1262,7 +1209,7 @@ def create_app() -> Flask:
             return {"error": "Invalid target"}, 400
 
         if request.method == "DELETE":
-            if LOCAL_MODE:
+            if LOCAL_MODE and not os.getenv("DATABASE_URL"):
                 store = _LOCAL_MESSAGES_STORE
                 if not store:
                     return {"error": "Storage unavailable"}, 500
@@ -1290,7 +1237,6 @@ def create_app() -> Flask:
                 db_session.execute(stmt)
             return {"status": "success"}, 200
 
-        # GET fallthrough uses existing logic with curr_nick
         target = target or curr_nick
         from sqlalchemy import asc, and_, or_, select
         stmt = (
@@ -1328,7 +1274,7 @@ def create_app() -> Flask:
             return {"error": "Unauthorized"}, 401
         curr_nick = nickname.lower()
 
-        if LOCAL_MODE:
+        if LOCAL_MODE and not os.getenv("DATABASE_URL"):
             store = _LOCAL_MESSAGES_STORE
             if not store:
                 return {"dialogs": []}, 200
@@ -1345,29 +1291,53 @@ def create_app() -> Flask:
                     }
                 )
             dialogs = _build_dialogs_from_rows(rows, curr_nick)
-            return {"dialogs": dialogs}, 200
+        else:
+            from sqlalchemy import or_, select
 
-        from sqlalchemy import or_, select
-
-        stmt = (
-            select(
-                messages_table.c.id,
-                messages_table.c.sender_id,
-                messages_table.c.receiver_id,
-                messages_table.c.content,
-                messages_table.c.created_at,
-                messages_table.c.is_read,
-            )
-            .where(
-                or_(
-                    messages_table.c.sender_id == curr_nick,
-                    messages_table.c.receiver_id == curr_nick,
+            stmt = (
+                select(
+                    messages_table.c.id,
+                    messages_table.c.sender_id,
+                    messages_table.c.receiver_id,
+                    messages_table.c.content,
+                    messages_table.c.created_at,
+                    messages_table.c.is_read,
+                )
+                .where(
+                    or_(
+                        messages_table.c.sender_id == curr_nick,
+                        messages_table.c.receiver_id == curr_nick,
+                    )
                 )
             )
-        )
-        with session_scope() as db_session:
-            rows = db_session.execute(stmt).mappings().all()
-        dialogs = _build_dialogs_from_rows(rows, curr_nick)
+            with session_scope() as db_session:
+                rows = db_session.execute(stmt).mappings().all()
+            dialogs = _build_dialogs_from_rows(rows, curr_nick)
+
+        # --- Обогащаем диалоги ссылками на аватары ---
+        unique_nicks = {d["interlocutor"].lower() for d in dialogs if d.get("interlocutor")}
+        avatars_map = {}
+        if unique_nicks:
+            if LOCAL_MODE and not os.getenv("DATABASE_URL"):
+                for nick in unique_nicks:
+                    preview = _build_author_preview(nick)
+                    avatars_map[nick] = preview.get("avatar_url")
+            else:
+                from sqlalchemy import select, func
+                with session_scope() as db_session:
+                    prof_stmt = select(profiles_table.c.nickname, profiles_table.c.avatar_path).where(
+                        func.lower(profiles_table.c.nickname).in_(unique_nicks)
+                    )
+                    db_rows = db_session.execute(prof_stmt).mappings().all()
+                    for row in db_rows:
+                        nick_key = row["nickname"].lower()
+                        ser = _serialize_profile(dict(row))
+                        avatars_map[nick_key] = ser.get("avatar_url") if ser else None
+
+        for d in dialogs:
+            interlocutor = d.get("interlocutor") or ''
+            d["avatar_url"] = avatars_map.get(interlocutor.lower())
+
         return {"dialogs": dialogs}, 200
 
     @app.route("/add_comment", methods=["POST"])
@@ -1411,33 +1381,8 @@ def create_app() -> Flask:
             abort(400, description="Некорректный идентификатор метки.")
         return jsonify({"comments": comments_for_pins([marker_id]).get(marker_id, [])})
 
-    @app.route("/api/pins/<int:pin_id>", methods=["GET", "DELETE"])
-    def manage_pin(pin_id: int) -> tuple[dict, int]:
-        if request.method == "GET":
-            pin = get_pin_by_id(pin_id)
-            if not pin:
-                abort(404)
-            payload = pin.to_dict()
-            user_id = pin.user_id
-            if user_id:
-                author = _build_user_state(user_id)
-                payload["author"] = {
-                    "nickname": author.get("nickname") or user_id,
-                    "avatar_url": author.get("avatar_url"),
-                    "rating_total": author.get("rating_total"),
-                    "age": author.get("age"),
-                    "gender": author.get("gender"),
-                    "followers_count": author.get("followers_count", 0),
-                }
-            else:
-                payload["author"] = None
-            app.logger.info(
-                "pin fetch requested: pin_id=%s rating=%s",
-                pin_id,
-                payload.get("rating"),
-            )
-            return jsonify(payload)
-
+    @app.route("/api/pins/<int:pin_id>", methods=["DELETE"])
+    def delete_pin_route(pin_id: int) -> tuple[dict, int]:
         nickname = session.get("user_nickname")
         if not nickname:
             return jsonify({"message": "Нужно войти в аккаунт, чтобы удалять метки."}), 401
@@ -1450,14 +1395,12 @@ def create_app() -> Flask:
         deleted = delete_pin(pin_id, user_id)
         if not deleted:
             abort(500)
-        app.logger.info("pin delete requested: pin_id=%s user=%s", pin_id, user_id)
         return jsonify({"deleted": True})
 
     @app.route("/api/pins/<int:pin_id>/vote", methods=["POST"])
     def vote(pin_id: int) -> tuple[dict, int]:
         nickname = session.get("user_nickname")
         if not nickname:
-            app.logger.debug("vote denied: unauthenticated request for pin_id=%s", pin_id)
             return {"message": "Нужно войти в аккаунт чтобы голосовать."}, 401
         payload = request.get_json(silent=True) or {}
         def parse_vote(value) -> int | None:
@@ -1481,18 +1424,10 @@ def create_app() -> Flask:
             "likes_count": result.get("likes_count"),
             "dislikes_count": result.get("dislikes_count"),
         }
-        # apply reputation delta to pin owner
         if result.get("reputation_delta") and result["pin_owner"]:
             adjust_user_reputation(result["pin_owner"], result["reputation_delta"], trigger_level_up=True)
         if result.get("profile_rating") is not None and result["pin_owner"] == nickname:
             response_payload["profile_rating"] = result["profile_rating"]
-        app.logger.info(
-            "vote recorded: pin_id=%s user=%s vote=%s rating=%s",
-            pin_id,
-            nickname,
-            response_payload["vote_value"],
-            response_payload["pin_rating"],
-        )
         return jsonify(response_payload)
 
     @app.route("/api/subscriptions", methods=["GET", "POST", "DELETE"])
@@ -1511,15 +1446,15 @@ def create_app() -> Flask:
 
             active_pins_counts = count_active_pins_for_users(list(unique_nicknames))
 
-            if LOCAL_MODE:
-                for nickname in payload:
-                    if not nickname:
+            if LOCAL_MODE and not os.getenv("DATABASE_URL"):
+                for nick in payload:
+                    if not nick:
                         continue
                     try:
-                        author_state = _build_user_state(nickname)
+                        author_state = _build_user_state(nick)
                     except Exception:
                         continue
-                    pin_count = active_pins_counts.get(nickname.lower(), 0)
+                    pin_count = active_pins_counts.get(nick.lower(), 0)
                     subscriptions_payload.append(
                         {
                             "nickname": author_state.get("nickname"),
@@ -1546,19 +1481,19 @@ def create_app() -> Flask:
                     if not nickname_key:
                         continue
                     profile_map[nickname_key.lower()] = dict(row)
-            for nickname in payload:
-                if not nickname:
+            for nick in payload:
+                if not nick:
                     continue
                 serialized = None
-                profile_dict = profile_map.get(nickname.lower())
+                profile_dict = profile_map.get(nick.lower())
                 if profile_dict:
                     serialized = _serialize_profile(profile_dict)
                 points = profile_dict.get("reputation_points", 0) if profile_dict else 0
                 rep_level = calculate_reputation_level(points)
-                pin_count = active_pins_counts.get(nickname.lower(), 0)
+                pin_count = active_pins_counts.get(nick.lower(), 0)
                 subscriptions_payload.append(
                     {
-                        "nickname": nickname,
+                        "nickname": nick,
                         "avatar_url": serialized.get("avatar_url") if serialized else None,
                         "reputation_level": rep_level,
                         "active_pins_count": pin_count,
@@ -1725,14 +1660,27 @@ def create_app() -> Flask:
 
 
 app = create_app()
-app.config['SECRET_KEY'] = 'your_secret_key_here'
-socketio = SocketIO(app, cors_allowed_origins="*")
+app.config['SECRET_KEY'] = SECRET_KEY
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 
 @socketio.on('join_pin')
 def on_join_pin(data):
     pin_id = str(data.get('pin_id'))
     join_room(pin_id)
+
+
+@socketio.on('get_comments')
+def on_get_comments(data):
+    pin_id = data.get('marker_id')
+    if not pin_id:
+        return
+    try:
+        pin_id = int(pin_id)
+    except (TypeError, ValueError):
+        return
+    comments = comments_for_pins([pin_id]).get(pin_id, [])
+    emit('load_comments', {'marker_id': pin_id, 'comments': comments})
 
 
 @socketio.on('leave_pin')

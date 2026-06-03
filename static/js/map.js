@@ -152,41 +152,83 @@ if (socket) {
     autoScrollComments(Number(markerId));
   });
 
+  socket.on('load_comments', ({ marker_id, comments }) => {
+    if (!marker_id || Number(marker_id) !== Number(currentCommentRoomPinId)) {
+      return;
+    }
+    if (!Array.isArray(comments)) {
+      return;
+    }
+    applyCommentsUpdate(Number(marker_id), comments, { animateNew: false, forceScroll: false, isInitialLoad: true });
+  });
+
   socket.on('new_message', (data) => {
     const msg = data?.message;
     if (!msg || !currentAuthUser) {
       return;
     }
     const myNick = normalizeNicknameForComparison(currentAuthUser.nickname);
-    const sender = normalizeNicknameForComparison(msg.sender);
-    const receiver = normalizeNicknameForComparison(msg.receiver);
+    const sender = normalizeNicknameForComparison(msg.sender || msg.sender_id);
+    const receiver = normalizeNicknameForComparison(msg.receiver || msg.receiver_id);
     const isFromMe = myNick === sender;
     const partner = isFromMe ? receiver : sender;
+    
     if (!partner) {
       return;
     }
-    const isChatOpenWithPartner = currentChatInterlocutor && normalizeNicknameForComparison(currentChatInterlocutor) === partner;
+    
+    const chatWindow = document.getElementById('chat-window-screen');
+    const isChatVisible = chatWindow && chatWindow.classList.contains('view-screen--active');
+    const isChatOpenWithPartner = isChatVisible && currentChatInterlocutor && normalizeNicknameForComparison(currentChatInterlocutor) === partner;
+    
     if (isChatOpenWithPartner) {
       const container = getChatMessagesContainer();
       if (container) {
-        const existing = container.querySelector(`.message[data-msg-id="${msg.id}"]`);
+        const msgIdStr = String(msg.id);
+        const existing = container.querySelector(`.message[data-msg-id="${msgIdStr}"]`);
         if (!existing) {
           appendChatMessageToContainer(container, msg, isFromMe);
-          const lastAppended = container.lastElementChild;
-          if (lastAppended) {
-            lastAppended.dataset.msgId = msg.id;
-          }
-          requestAnimationFrame(() => scrollChatMessagesToBottom(container));
+          setTimeout(() => {
+            scrollChatMessagesToBottom(container);
+          }, 50);
         }
+      }
+      if (!isFromMe) {
+        markMessagesRead(partner);
       }
       return;
     }
+    
     const inboxScreen = document.getElementById('inbox-screen');
-    const isInboxVisible = inboxScreen?.classList.contains('view-screen--active');
+    const isInboxVisible = inboxScreen && inboxScreen.classList.contains('view-screen--active');
     if (isInboxVisible) {
       loadAndRenderInbox();
     } else if (!isFromMe) {
-      showUserToast(`Новое сообщение от ${msg.sender}`);
+      showUserToast(`Новое сообщение от ${msg.sender || msg.sender_id}`);
+    }
+  });
+
+  socket.on('messages_read', (data) => {
+    if (!data || !data.reader) {
+      return;
+    }
+    const reader = normalizeNicknameForComparison(data.reader);
+    const currentPartner = currentChatInterlocutor ? normalizeNicknameForComparison(currentChatInterlocutor) : null;
+    
+    if (reader === currentPartner) {
+      const container = getChatMessagesContainer();
+      if (container) {
+        const unreadOutgoing = container.querySelectorAll('.message.outgoing[data-is-read="false"]');
+        const doubleCheckSVG = `<svg width="22" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 6 7 17 2 12"></polyline><path d="M22 6L12 16"></path></svg>`;
+        
+        unreadOutgoing.forEach((msgEl) => {
+          msgEl.dataset.isRead = 'true';
+          const statusEl = msgEl.querySelector('.bubble-status');
+          if (statusEl) {
+            statusEl.innerHTML = doubleCheckSVG;
+          }
+        });
+      }
     }
   });
 }
@@ -1507,8 +1549,14 @@ function appendChatMessageToContainer(container, message, isOutgoing) {
   }
   const wrapper = document.createElement('div');
   wrapper.className = `message ${isOutgoing ? 'outgoing' : 'incoming'}`;
+  if (message.id) {
+    wrapper.dataset.msgId = String(message.id);
+  }
+  wrapper.dataset.isRead = message.is_read ? 'true' : 'false';
   
-  const statusIcon = message.is_read ? '✓✓' : '✓';
+  const singleCheckSVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+  const doubleCheckSVG = `<svg width="22" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 6 7 17 2 12"></polyline><path d="M22 6L12 16"></path></svg>`;
+  const statusIcon = message.is_read ? doubleCheckSVG : singleCheckSVG;
   const timeText = typeof formatSmartDate === 'function' ? formatSmartDate(message.created_at) : '';
   wrapper.innerHTML = `
     <div class="bubble">
@@ -1651,10 +1699,6 @@ function sendChatMessage() {
         const container = getChatMessagesContainer();
         if (message && container) {
           appendChatMessageToContainer(container, message, true);
-          const lastAppended = container.lastElementChild;
-          if (lastAppended) {
-            lastAppended.dataset.msgId = message.id;
-          }
           container.scrollTop = container.scrollHeight;
         }
       if (input) {
@@ -1690,6 +1734,11 @@ async function loadAndRenderInbox() {
     dialogs.forEach((chat) => {
       const interlocutor = (chat.interlocutor || '').trim();
       const lastMessage = chat.last_message || '';
+      const avatarUrl = chat.avatar_url ? escapeHtml(chat.avatar_url) : '';
+      const letter = (interlocutor.charAt(0) || 'A').toUpperCase();
+      const avatarMarkup = avatarUrl 
+        ? `<img src="${avatarUrl}" alt="Аватар" style="width:100%; height:100%; object-fit:cover; border-radius:50%;" loading="lazy">` 
+        : letter;
 
       const wrapper = document.createElement('div');
       wrapper.className = 'dialog-item-wrapper';
@@ -1724,7 +1773,7 @@ async function loadAndRenderInbox() {
       };
 
       card.innerHTML = `
-        <div class="dialog-avatar">${(interlocutor.charAt(0) || 'A').toUpperCase()}</div>
+        <div class="dialog-avatar" style="padding:0; overflow:hidden; display:flex; align-items:center; justify-content:center;">${avatarMarkup}</div>
         <div class="dialog-info">
           <div class="dialog-header">
             <span class="dialog-name">${interlocutor || 'Собеседник'}</span>
@@ -1880,6 +1929,9 @@ function renderAuthorSheetForPin(pin) {
   attachCommentHandlers(pin.id);
   initializeCommentsView(pin.id, pin.comments || []);
   joinCommentRoom(pin.id);
+  if (socket) {
+    socket.emit('get_comments', { marker_id: pin.id });
+  }
   attachAuthorPopupHandlers({ getElement: () => content }, pin);
   initializePinTimer(pin);
 
@@ -2475,6 +2527,15 @@ function scrollCommentsToBottom(pinId, options = {}) {
   });
   meta.locked = false;
   requestAnimationFrame(() => updateScrollHintState(listEl));
+
+  // Автоматически прокручиваем внешний контейнер (шторку или попап карты)
+  const outerContainer = listEl.closest('#author-sheet-content') || listEl.closest('.leaflet-popup-content');
+  if (outerContainer) {
+    outerContainer.scrollTo({
+      top: outerContainer.scrollHeight,
+      behavior: smooth ? 'smooth' : 'auto',
+    });
+  }
 }
 
 function buildCommentElement(comment, pinId, canDelete) {
@@ -2520,8 +2581,15 @@ function buildCommentElement(comment, pinId, canDelete) {
 }
 
 function applyCommentsUpdate(pinId, comments, options = {}) {
-  const { animateNew = false, forceScroll = false } = options;
+  const { animateNew = false, forceScroll = false, isInitialLoad = false } = options;
   const normalized = Array.isArray(comments) ? comments.slice() : [];
+  const popupEl = document.querySelector(`.pin-popup[data-pin-id="${pinId}"]`);
+  if (popupEl) {
+    const countBadge = popupEl.querySelector('.pin-detail-card__message-count');
+    if (countBadge) {
+      countBadge.textContent = normalized.length;
+    }
+  }
   const listEl = getOrCreateCommentsList(pinId, normalized);
   if (!listEl) {
     return;
@@ -2559,7 +2627,7 @@ function applyCommentsUpdate(pinId, comments, options = {}) {
   updateScrollHintState(listEl);
   if (forceScroll) {
     scrollCommentsToBottom(pinId, { force: true, smooth: true });
-  } else if (hasNewEntries && !meta.locked) {
+  } else if (hasNewEntries && !meta.locked && !isInitialLoad) {
     scrollCommentsToBottom(pinId, { force: true, smooth: animateNew });
   }
 }
@@ -2570,7 +2638,6 @@ function initializeCommentsView(pinId, comments) {
   if (listEl) {
     bindCommentListScroll(pinId, listEl);
     requestAnimationFrame(() => {
-      scrollCommentsToBottom(pinId, { force: true, smooth: false });
       updateScrollHintState(listEl);
     });
   }
@@ -4545,6 +4612,17 @@ window.addEventListener('load', function () {
   document.querySelectorAll('.bottom-nav__item').forEach((item) => {
     item.addEventListener('click', () => {
       const targetView = item.getAttribute('data-nav-target');
+      // Принудительно скроллим профиль в самый верх при переходе
+      if (targetView === 'profile') {
+        const profileScreen = document.getElementById('profile-screen');
+        if (profileScreen) {
+          profileScreen.scrollTop = 0;
+          const innerContainer = profileScreen.firstElementChild;
+          if (innerContainer) {
+            innerContainer.scrollTop = 0;
+          }
+        }
+      }
       if (targetView && targetView !== 'chats') {
         document.getElementById('chat-window-screen')?.classList.remove('view-screen--active');
         document.getElementById('inbox-screen')?.classList.remove('view-screen--active');
