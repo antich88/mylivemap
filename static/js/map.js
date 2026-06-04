@@ -141,6 +141,15 @@ let currentCommentRoomPinId = null;
 const pinTimerHandles = new Map();
 const socket = typeof io === 'function' ? io() : null;
 if (socket) {
+  // Восстановление подписок на комнаты при старте или переподключении (после дисконнекта)
+  socket.on('connect', () => {
+    if (currentAuthUser && currentAuthUser.nickname) {
+      socket.emit('join_user_room', { nickname: currentAuthUser.nickname });
+    }
+    if (currentCommentRoomPinId) {
+      socket.emit('join_pin', { pin_id: currentCommentRoomPinId });
+    }
+  });
   socket.on('comments_updated', ({ marker_id: markerId, comments }) => {
     if (!markerId || Number(markerId) !== Number(currentCommentRoomPinId)) {
       return;
@@ -1701,12 +1710,18 @@ function sendChatMessage() {
   })
     .then(handleJsonResponse)
     .then((data) => {
-        const message = data?.message;
-        const container = getChatMessagesContainer();
-        if (message && container) {
+      const message = data?.message;
+      const container = getChatMessagesContainer();
+      if (message && container) {
+        const msgIdStr = String(message.id);
+        const existing = container.querySelector(`.message[data-msg-id="${msgIdStr}"]`);
+        if (!existing) {
           appendChatMessageToContainer(container, message, true);
-          container.scrollTop = container.scrollHeight;
+          setTimeout(() => {
+            container.scrollTop = container.scrollHeight;
+          }, 50);
         }
+      }
       if (input) {
         input.value = '';
       }
