@@ -150,6 +150,12 @@ if (socket) {
     }
     applyCommentsUpdate(Number(markerId), comments, { animateNew: true });
     autoScrollComments(Number(markerId));
+    const scrollContainer = document.querySelector('.pin-detail-card');
+    if (scrollContainer) {
+      setTimeout(() => {
+        scrollContainer.scrollTo({ top: scrollContainer.scrollHeight, behavior: 'smooth' });
+      }, 50);
+    }
   });
 
   socket.on('load_comments', ({ marker_id, comments }) => {
@@ -1935,6 +1941,30 @@ function renderAuthorSheetForPin(pin) {
   attachAuthorPopupHandlers({ getElement: () => content }, pin);
   initializePinTimer(pin);
 
+  // Инициализация плавающей кнопки скролла
+  const scrollContainer = content.querySelector('.pin-detail-card');
+  const scrollBtn = content.querySelector('.scroll-to-bottom-btn');
+
+  if (scrollContainer && scrollBtn) {
+    const updateScrollBtn = () => {
+      const commentsCount = scrollContainer.querySelectorAll('.pin-comment').length;
+      const isNotAtBottom = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight > 80;
+      if (commentsCount > 15 && isNotAtBottom) {
+        scrollBtn.classList.remove('is-hidden');
+      } else {
+        scrollBtn.classList.add('is-hidden');
+      }
+    };
+
+    scrollContainer.addEventListener('scroll', updateScrollBtn, { passive: true });
+
+    scrollBtn.addEventListener('click', () => {
+      scrollContainer.scrollTo({ top: scrollContainer.scrollHeight, behavior: 'smooth' });
+    });
+
+    setTimeout(updateScrollBtn, 150);
+  }
+
   sheet.removeAttribute('hidden');
   if (backdrop) backdrop.removeAttribute('hidden');
   sheet.style.transition = 'none';
@@ -2316,12 +2346,12 @@ function renderContactRow(contactStr) {
   const safeVal = escapeHtml(val);
   return `
     <a href="${href}" class="pin-popup__contact-row" target="_blank" rel="noopener noreferrer">
-      <div class="contact-info">
+      <div class="pin-popup__contact-icon" aria-hidden="true">
         ${icon}
-        <div>
-          <div class="contact-label">${type}</div>
-          <div class="contact-value">${safeVal}</div>
-        </div>
+      </div>
+      <div class="pin-popup__contact-text">
+        <span class="pin-popup__contact-label">${type}</span>
+        <span class="pin-popup__contact-value">${safeVal}</span>
       </div>
     </a>
   `;
@@ -2346,6 +2376,16 @@ function createPopupContent(pin) {
     : null;
   const initialTimerInfo = formatRemainingTime(ttlSeconds);
   const canDeletePin = Boolean(currentNickname && currentNickname === pin.user_id);
+  const categoryColor = category?.color || pin.color || '#5a87ff';
+  const categoryIcon = category?.icon || '';
+  const categoryLabel = category?.label || category?.name || 'Без категории';
+
+  const categoryBadgeMarkup = `
+    <div class="pin-detail-card__category-badge" style="color: ${categoryColor}; background: color-mix(in srgb, ${categoryColor} 15%, transparent);">
+      <span class="pin-detail-card__category-icon">${categoryIcon}</span>
+      <span>${categoryLabel}</span>
+    </div>
+  `;
 
   const voteControlsMarkup = renderVoteControls(pin);
   const voteRowMarkup = `
@@ -2387,10 +2427,13 @@ function createPopupContent(pin) {
             ${renderReputationBadge(author)}
           </div>
         </div>
-          <div class="pin-detail-card__ttl" data-pin-timer="${pin.id}">
-            <span class="marker-timer ${initialTimerInfo.urgent ? 'timer-urgent' : ''}" style="color: ${initialTimerInfo.color};">
-              ${initialTimerInfo.text}
-            </span>
+          <div class="pin-detail-card__meta-right">
+            ${categoryBadgeMarkup}
+            <div class="pin-detail-card__ttl" data-pin-timer="${pin.id}">
+              <span class="marker-timer ${initialTimerInfo.urgent ? 'timer-urgent' : ''}" style="color: ${initialTimerInfo.color};">
+                ${initialTimerInfo.text}
+              </span>
+            </div>
           </div>
         </div>
         ${voteRowMarkup}
@@ -2406,6 +2449,13 @@ function createPopupContent(pin) {
           <span class="pin-detail-card__message-count">${commentCount}</span>
         </div>
         ${commentsList}
+        <div class="scroll-to-bottom-wrapper">
+          <button type="button" class="scroll-to-bottom-btn is-hidden" aria-label="Вниз" title="К последним комментариям">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+        </div>
         ${commentForm}
       </section>
 
@@ -2417,7 +2467,7 @@ function createPopupContent(pin) {
 function renderCommentsList(comments, currentNickname, pinId) {
   const normalizedComments = Array.isArray(comments) ? comments : [];
   if (!normalizedComments.length) {
-    return '<div class="pin-comments__empty">Комментариев пока нет</div>';
+    return '<div class="pin-popup__comments-empty">Комментариев пока нет</div>';
   }
   const items = normalizedComments
     .map((comment) => {
@@ -2467,7 +2517,7 @@ function getOrCreateCommentsList(pinId, snapshot) {
   }
   const currentNickname = currentAuthUser?.nickname || null;
   const markup = renderCommentsList(snapshot, currentNickname, pinId);
-  const placeholder = popup.querySelector('.pin-comments__empty');
+  const placeholder = popup.querySelector('.pin-popup__comments-empty');
   if (placeholder) {
     placeholder.outerHTML = markup;
   } else {
@@ -2602,7 +2652,7 @@ function applyCommentsUpdate(pinId, comments, options = {}) {
 
   listEl.innerHTML = '';
   if (!normalized.length) {
-    listEl.innerHTML = '<div class="pin-comments__empty">Комментариев пока нет</div>';
+    listEl.innerHTML = '<div class="pin-popup__comments-empty">Комментариев пока нет</div>';
     commentStateCache.set(pinId, []);
     updateScrollHintState(listEl);
     return;

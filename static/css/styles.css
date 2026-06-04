@@ -2578,6 +2578,48 @@ button.author-inline.pin-detail-card__author-trigger {
   background: rgba(198, 40, 40, 0.15);
 }
 
+.pin-detail-card__author-row {
+  align-items: stretch !important;
+}
+.pin-detail-card__meta-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-start;
+  padding-top: 4px;
+}
+.pin-detail-card__meta-right .pin-detail-card__ttl {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+}
+.pin-detail-card__category-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  line-height: 1;
+  border: 1px solid currentColor;
+  opacity: 0.9;
+}
+.pin-detail-card__category-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pin-detail-card__category-icon svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2px;
+  color: currentColor;
+}
+
 .pin-detail-card__author-rating {
   font-size: clamp(11px, 0.75rem, 12px);
   color: rgba(255, 255, 255, 0.6);
@@ -3956,6 +3998,183 @@ mask: radial-gradient(circle at center, transparent 31%, black 32%);
   border-radius: 50% !important;
 }
 
+/* 1. Родитель работает как трафарет: жестко обрезает всё по круглым краям */
+#author-sheet-content .pin-popup {
+  border-top-left-radius: 24px !important;
+  border-top-right-radius: 24px !important;
+  overflow: hidden !important;
+  transform: translateZ(0) !important; /* Лечит баг «квадратных углов» при скролле в браузерах */
+}
+
+/* 2. Сама карточка отвечает за скролл */
+#author-sheet-content .pin-detail-card {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  padding: 16px 20px !important; /* Исходный верхний отступ 16px */
+  -webkit-overflow-scrolling: touch; /* Плавный скролл на iOS */
+}
+
+/* 3. Липкая шапка с математически точными отступами */
+#author-sheet-content .pin-detail-card__header {
+  position: sticky !important;
+  top: -16px !important; /* Точно компенсирует padding-top контейнера (дыры больше не будет) */
+  margin: -16px -20px 0 -20px !important; /* Растягивает шапку вплотную к краям */
+  padding: 16px 20px 16px 20px !important; /* Возвращает внутреннее пространство */
+  background: #242424 !important; /* Фон как у карточки */
+  z-index: 100 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important; /* Легкая линия снизу для красоты при скролле */
+}
+
+/* --- ОТКЛЮЧЕНИЕ ВНУТРЕННЕГО СКРОЛЛА КОММЕНТАРИЕВ --- */
+#author-sheet-content .pin-comments,
+#author-sheet-content .pin-comments__list {
+  flex: none !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+/* --- ПЛАВАЮЩАЯ КНОПКА СКРОЛЛА ВНИЗ --- */
+.scroll-to-bottom-wrapper {
+  position: sticky !important;
+  bottom: 24px !important;
+  margin-top: -36px !important;
+  z-index: 100 !important;
+  pointer-events: none !important;
+  display: flex !important;
+  justify-content: center !important;
+  width: 100% !important;
+  left: 0 !important;
+}
+
+.scroll-to-bottom-btn {
+  width: 36px !important;
+  height: 36px !important;
+  background: transparent !important;
+  border: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+  color: #ffffff !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+  animation: floatDown 2s infinite ease-in-out !important;
+}
+
+.scroll-to-bottom-btn svg {
+  width: 24px !important;
+  height: 24px !important;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6)) !important;
+  stroke: #ffffff !important;
+}
+
+.scroll-to-bottom-btn.is-hidden {
+  opacity: 0 !important;
+  transform: translateY(10px) scale(0.8) !important;
+  pointer-events: none !important;
+  animation: none !important;
+}
+
+@keyframes floatDown {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(4px); }
+}
+
+/* Убираем фоновую плашку с текстовой заглушки */
+.pin-popup__comments-empty {
+  background: none !important;
+  border: none !important;
+  color: var(--text-muted, #9aa2c1);
+  text-align: center;
+  padding: 20px 10px !important;
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* Стилизуем контейнер формы ввода комментария, превращая его в интуитивный инпут */
+.pin-popup__comment-form {
+  background: rgba(15, 19, 29, 0.7) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 12px !important;
+  padding: 6px 10px !important;
+  display: flex !important;
+  align-items: flex-end !important;
+  gap: 8px !important;
+  margin-top: 12px !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Подсветка поля при фокусе (клике) */
+.pin-popup__comment-form:focus-within {
+  border-color: rgba(90, 135, 255, 0.5) !important;
+  box-shadow: 0 0 0 2px rgba(90, 135, 255, 0.15) !important;
+}
+
+/* Очищаем сам textarea от старых рамок и фонов, чтобы он сливался с новой плашкой */
+.pin-popup__comment-form textarea {
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  padding: 6px 0 !important;
+  color: #ffffff !important;
+  font-size: 13px !important;
+  resize: none !important;
+  flex: 1 !important;
+  min-height: 24px !important;
+  max-height: 120px !important;
+}
+
+/* Делаем текст плейсхолдера приятного приглушенного цвета */
+.pin-popup__comment-form textarea::placeholder {
+  color: rgba(255, 255, 255, 0.4) !important;
+}
+
+/* Кнопка отправки внутри формы (иконка самолетика/стрелочки) */
+.pin-popup__comment-form button {
+  background: transparent !important;
+  border: none !important;
+  color: var(--accent, #5a87ff) !important;
+  padding: 6px !important;
+  cursor: pointer !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.1s ease;
+}
+
+.pin-popup__comment-form button:active {
+  transform: scale(0.9);
+}
+
+/* 1. Уменьшаем отступ между Названием ("123") и Описанием ("12") */
+.pin-popup__title {
+  margin-bottom: 4px !important; /* Было 8px */
+}
+
+/* 2. Уменьшаем отступ между Описанием ("12") и разделительной линией Обсуждения */
+.pin-popup__description {
+  margin-bottom: 12px !important; /* Было 24px */
+}
+
+/* 3. Корректируем верхнюю линию обсуждения и её отступы */
+.pin-comments__header {
+  margin: 0 -20px 6px -20px !important; /* Уменьшили нижний отступ до 6px (был 12px) */
+  padding: 12px 20px 0 !important; /* Снизили верхний внутренний отступ до 12px (был 16px) */
+}
+
+/* 4. Уменьшаем пустоту между заголовком "ОБСУЖДЕНИЕ" и надписью "Комментариев пока нет" */
+.pin-popup__comments-empty {
+  padding: 10px 10px !important; /* Было 20px 10px — урезали высоту в два раза */
+}
+
+/* 5. Уменьшаем отступ между надписью "Комментариев пока нет" и полем ввода "Написать..." */
+.pin-popup__comment-form {
+  margin-top: 4px !important; /* Снизили до 4px (было 12px/10px) */
+}
+
 /* 2. Состояние при нажатии (моментальный эффект для мобилок и ПК) */
 .leaflet-control-zoom a:active,
 .leaflet-control-zoom button.leaflet-control-zoom-geolocate:active,
@@ -4591,50 +4810,65 @@ mask: radial-gradient(circle at center, transparent 31%, black 32%);
   color: #ff4d4f;
 }
 
-/* --- ИНТЕРАКТИВНАЯ СТРОКА КОНТАКТА --- */
+/* --- МИНИМАЛИСТИЧНЫЙ БЛОК КОНТАКТОВ --- */
 .pin-popup__contact-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 10px 14px;
-  border-radius: 14px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  margin-bottom: 16px; /* Воздух до секции обсуждения */
-  text-decoration: none;
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  margin-bottom: 12px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  text-decoration: none !important;
 }
 
-.pin-popup__contact-row:active {
-  transform: scale(0.98);
-  background: rgba(255, 255, 255, 0.08);
+.pin-popup__contact-icon {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 50% !important;
+  background: rgba(90, 135, 255, 0.1) !important;
+  color: var(--accent, #5a87ff) !important;
+  flex-shrink: 0 !important;
 }
 
-.pin-popup__contact-row .contact-info {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.pin-popup__contact-icon svg {
+  width: 18px !important;
+  height: 18px !important;
+  stroke: currentColor !important;
+  fill: none !important;
 }
 
-.pin-popup__contact-row svg {
-  color: #5a87ff;
+.pin-popup__contact-text {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
 }
 
+.pin-popup__contact-label,
 .pin-popup__contact-row .contact-label {
-  font-size: 11px;
-  color: #9aa2c1;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  line-height: 1.2;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  color: var(--text-muted, #9aa2c1) !important;
+  letter-spacing: 0.5px !important;
+  line-height: 1 !important;
 }
 
+.pin-popup__contact-value,
 .pin-popup__contact-row .contact-value {
-  font-size: 14px;
-  color: #ffffff;
-  font-weight: 700;
-  line-height: 1.4;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  color: var(--text-main, #e5e9ff) !important;
+  word-break: break-word !important;
+}
+
+.pin-popup__contact-value a,
+.pin-popup__contact-row .contact-value a {
+  color: var(--accent, #5a87ff) !important;
+  text-decoration: none !important;
 }
 
 /* --- АДАПТИВ ПАНЕЛИ КАТЕГОРИЙ (Планшеты и ПК) --- */
