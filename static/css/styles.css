@@ -2442,13 +2442,7 @@ button.author-inline.pin-detail-card__author-trigger {
   border: none;
 }
 
-.pin-popup__author-badge.pin-popup__author-badge--novice,
-.pin-popup__author-badge.pin-popup__author-badge--active,
-.pin-popup__author-badge.pin-popup__author-badge--verified,
-.pin-popup__author-badge.pin-popup__author-badge--expert,
-.pin-popup__author-badge.pin-popup__author-badge--legend {
-  /* уровень различается иконкой и текстом */
-}
+
 
 /* Заголовок метки — жирный и яркий */
 .pin-popup__title {
@@ -2612,7 +2606,8 @@ button.author-inline.pin-detail-card__author-trigger {
   border-radius: 50%;
   padding: 3px;
   background: linear-gradient(180deg, rgba(74, 222, 128, 0.4), rgba(96, 165, 250, 0.3));
-  -webkit-mask: radial-gradient(circle at center, transparent 51%, black 52%);
+-webkit-mask: radial-gradient(circle at center, transparent 31%, black 32%);
+mask: radial-gradient(circle at center, transparent 31%, black 32%);
 }
 
 .pin-detail-card__avatar-img {

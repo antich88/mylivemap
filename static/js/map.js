@@ -3264,13 +3264,16 @@ function toggleUserPanelExpandedState(expanded, view = 'profile') {
 }
 
 function updateProfileModeButtonVisibility(mode) {
-  const button = document.querySelector('.profile-mode-btn');
+  const button = document.querySelector('.profile-settings-btn');
   if (!button) {
     return;
   }
-  console.log('--- FIX: Profile Button State ---', mode);
-  if (mode === PROFILE_BUTTON_STATES.PROFILE) {
-    button.style.setProperty('display', 'block', 'important');
+  const isAuth = isAuthenticated();
+  const profileScreen = document.querySelector('.view-screen--profile');
+  const isProfileTabActive = profileScreen && profileScreen.classList.contains('view-screen--active');
+
+  if (isAuth && (mode === PROFILE_BUTTON_STATES.PROFILE || isProfileTabActive)) {
+    button.style.setProperty('display', 'flex', 'important');
   } else {
     button.style.setProperty('display', 'none', 'important');
   }
@@ -3473,6 +3476,7 @@ function renderAuthState(message = '') {
   renderAuthState.previousAuthenticated = authenticated;
   syncAuthorCloseButtonLabel();
   updateFollowersCounter(currentAuthUser?.followers_count ?? 0);
+  updateProfileModeButtonVisibility(PROFILE_BUTTON_STATES.PROFILE);
 }
 
 function updateProfileToggleButtonPresence(authenticated) {
@@ -4058,6 +4062,9 @@ function initAuthWidget() {
         .then((result) => {
           currentAuthUser = result.user;
           renderAuthState(successMessage);
+          if (typeof updateProfileModeButtonVisibility === 'function') {
+            updateProfileModeButtonVisibility(PROFILE_BUTTON_STATES.PROFILE);
+          }
           setAuthPanelVisibility(false);
           const displayNameInput = document.querySelector('.user-panel__input[name="profile_display_name"]');
           if (displayNameInput && currentAuthUser?.nickname) {
@@ -4085,6 +4092,9 @@ function initAuthWidget() {
         .then(() => {
           currentAuthUser = null;
           renderAuthState('Вы вышли из аккаунта.');
+          if (typeof updateProfileModeButtonVisibility === 'function') {
+            updateProfileModeButtonVisibility(PROFILE_BUTTON_STATES.COLLAPSED);
+          }
           setAuthPanelVisibility(false);
           refreshMarkers();
         })
@@ -4614,14 +4624,19 @@ window.addEventListener('load', function () {
       const targetView = item.getAttribute('data-nav-target');
       // Принудительно скроллим профиль в самый верх при переходе
       if (targetView === 'profile') {
-        const profileScreen = document.getElementById('profile-screen');
-        if (profileScreen) {
-          profileScreen.scrollTop = 0;
-          const innerContainer = profileScreen.firstElementChild;
-          if (innerContainer) {
-            innerContainer.scrollTop = 0;
+        // Добавляем обновление шестеренки при каждом клике на профиль
+        updateProfileModeButtonVisibility(PROFILE_BUTTON_STATES.PROFILE);
+        requestAnimationFrame(() => {
+          const profileScreen = document.querySelector('.view-screen--profile');
+          if (profileScreen) {
+            profileScreen.scrollTop = 0;
+            profileScreen.querySelectorAll('div').forEach((div) => {
+              div.scrollTop = 0;
+            });
+            profileScreen.style.display = '';
+            window.scrollTo(0, 0);
           }
-        }
+        });
       }
       if (targetView && targetView !== 'chats') {
         document.getElementById('chat-window-screen')?.classList.remove('view-screen--active');
