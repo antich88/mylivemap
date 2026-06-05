@@ -53,6 +53,7 @@ if not LOCAL_MODE and metadata is not None and friendships_table is not None and
             "Friendship",
             back_populates="user",
             lazy="joined",
+            foreign_keys=[friendships_table.c.user_id],
         )
         friends = relationship(
             "User",
@@ -66,7 +67,7 @@ if not LOCAL_MODE and metadata is not None and friendships_table is not None and
     class UserProfile(Base):
         __table__ = profiles_table
 
-    class Pin(Base):
+    class PinModel(Base):
         __table__ = pins_table
 
     class Comment(Base):

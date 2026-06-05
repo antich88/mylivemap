@@ -150,7 +150,7 @@ def create_app() -> Flask:
     # --- НАСТРОЙКА FLASK-ADMIN ---
     if not LOCAL_MODE:
         from database import SessionLocal
-        from models import User, Pin, Comment, UserProfile
+        from models import User, PinModel, Comment, UserProfile
         from flask_admin import Admin
         from flask_admin.contrib.sqla import ModelView
         from sqlalchemy.orm import scoped_session
@@ -166,7 +166,7 @@ def create_app() -> Flask:
         admin_panel = Admin(app, name='LiveMap Admin', url='/admin-panel')
         admin_panel.add_view(SecureModelView(User, admin_session, name='Пользователи'))
         admin_panel.add_view(SecureModelView(UserProfile, admin_session, name='Профили'))
-        admin_panel.add_view(SecureModelView(Pin, admin_session, name='Метки'))
+        admin_panel.add_view(SecureModelView(PinModel, admin_session, name='Метки'))
         admin_panel.add_view(SecureModelView(Comment, admin_session, name='Комментарии'))
     # -----------------------------
 
@@ -229,6 +229,7 @@ def create_app() -> Flask:
             "reputation_level": 0,
             "level_up_pending": False,
             "is_verified": False,
+            "is_admin": False,
             "profile": None,
             "subscriptions": [],
             "followers_count": 0,
@@ -304,11 +305,13 @@ def create_app() -> Flask:
                 profiles_table.c.is_verified,
                 profiles_table.c.created_at,
                 profiles_table.c.updated_at,
+                users_table.c.is_admin,
                 func.coalesce(rating_subq.c.rating_total, 0).label("rating_total"),
                 func.coalesce(followers_subq.c.followers_count, 0).label("followers_count"),
             )
             .select_from(
                 profiles_table
+                .outerjoin(users_table, users_table.c.nickname == profiles_table.c.nickname)
                 .outerjoin(rating_subq, rating_subq.c.user_id == profiles_table.c.nickname)
                 .outerjoin(followers_subq, followers_subq.c.author_id == profiles_table.c.nickname)
             )
@@ -341,6 +344,7 @@ def create_app() -> Flask:
                 else:
                     base["profile"] = None
                 base["followers_count"] = int(profile_data.get("followers_count") or 0)
+                base["is_admin"] = bool(profile_data.get("is_admin") or False)
 
                 subs_stmt = select(user_subscriptions_table.c.author_id).where(
                     user_subscriptions_table.c.follower_id == nickname
@@ -631,6 +635,9 @@ def create_app() -> Flask:
         else:
             payload["user"] = None
             payload["subscriptions"] = []
+        if user:
+            payload_user = payload.get("user") or {}
+            session["is_admin"] = bool(payload_user.get("is_admin", False))
         return payload, 200
 
     @app.route("/profile", methods=["PATCH"])
