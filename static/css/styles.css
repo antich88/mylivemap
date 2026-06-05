@@ -53,7 +53,7 @@
 
 .user-toast {
   position: fixed;
-  bottom: 1.5rem;
+  bottom: calc(100px + env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%) translateY(16px);
   padding: 0.9rem 1.3rem;
