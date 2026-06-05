@@ -17,6 +17,7 @@ from database import (
     votes_table,
     friendships_table,
     users_table,
+    profiles_table,
     comments_table,
 )
 
@@ -61,6 +62,15 @@ if not LOCAL_MODE and metadata is not None and friendships_table is not None and
             viewonly=True,
             lazy="joined",
         )
+
+    class UserProfile(Base):
+        __table__ = profiles_table
+
+    class Pin(Base):
+        __table__ = pins_table
+
+    class Comment(Base):
+        __table__ = comments_table
 
 else:
     Base = None  # type: ignore

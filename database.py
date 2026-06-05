@@ -188,6 +188,7 @@ else:
         Column("id", Integer, primary_key=True),
         Column("nickname", String(255), nullable=False, unique=True),
         Column("password_hash", String(512), nullable=False),
+        Column("is_admin", Integer, default=0, nullable=False),
         Column("created_at", DateTime(timezone=True), nullable=False),
         UniqueConstraint("nickname", name="uq_users_nickname"),
     )
@@ -331,6 +332,12 @@ else:
                 with ENGINE.begin() as conn:
                     for stmt in alter_statements:
                         conn.execute(text(stmt))
+
+        if "users" in table_names:
+            user_columns = [col["name"] for col in inspector.get_columns("users")]
+            if "is_admin" not in user_columns:
+                with ENGINE.begin() as conn:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0 NOT NULL"))
 
 
     _ensure_remote_schema_updates()

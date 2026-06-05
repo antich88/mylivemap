@@ -15,7 +15,6 @@ from typing import BinaryIO
 from flask import Flask, abort, jsonify, redirect, render_template, request, session, url_for
 from flask_socketio import SocketIO, join_room, leave_room, emit
 from werkzeug.utils import secure_filename
-
 try:
     import cloudinary
     from cloudinary import uploader as cloudinary_uploader
@@ -77,6 +76,7 @@ from database import (
     user_subscriptions_table,
 )
 from models import (
+    User,
     active_pins,
     add_comment,
     comments_for_pins,
@@ -146,6 +146,29 @@ def create_app() -> Flask:
             app.logger.warning("Не удалось создать каталог аватаров %s: %s", AVATAR_UPLOAD_DIR, exc)
 
     _ensure_avatar_upload_dir()
+
+    # --- НАСТРОЙКА FLASK-ADMIN ---
+    if not LOCAL_MODE:
+        from database import SessionLocal
+        from models import User, Pin, Comment, UserProfile
+        from flask_admin import Admin
+        from flask_admin.contrib.sqla import ModelView
+        from sqlalchemy.orm import scoped_session
+
+        class SecureModelView(ModelView):
+            def is_accessible(self):
+                return session.get('is_admin') is True
+
+            def inaccessible_logic(self, name, **kwargs):
+                abort(403)
+                
+        admin_session = scoped_session(SessionLocal)
+        admin_panel = Admin(app, name='LiveMap Admin', url='/admin-panel')
+        admin_panel.add_view(SecureModelView(User, admin_session, name='Пользователи'))
+        admin_panel.add_view(SecureModelView(UserProfile, admin_session, name='Профили'))
+        admin_panel.add_view(SecureModelView(Pin, admin_session, name='Метки'))
+        admin_panel.add_view(SecureModelView(Comment, admin_session, name='Комментарии'))
+    # -----------------------------
 
     try:
         init_schema()
@@ -534,6 +557,7 @@ def create_app() -> Flask:
             return {"message": "Пользователь с таким именем уже существует."}, 409
 
         session["user_nickname"] = user.nickname
+        session["is_admin"] = False
         return {"user": _build_user_state(user.nickname)}, 201
 
     @app.route("/login", methods=["POST"])
@@ -551,6 +575,7 @@ def create_app() -> Flask:
             return {"message": "Неверные имя пользователя или пароль."}, 401
 
         session["user_nickname"] = user.nickname
+        session["is_admin"] = bool(user.is_admin)
         return {"user": _build_user_state(user.nickname)}, 200
 
     @app.route("/profile/nickname", methods=["POST"])
@@ -592,6 +617,7 @@ def create_app() -> Flask:
     @app.route("/logout", methods=["POST"])
     def logout_user() -> tuple[dict, int]:
         session.pop("user_nickname", None)
+        session.pop("is_admin", None)
         return {"ok": True}, 200
 
     @app.route("/me", methods=["GET"])

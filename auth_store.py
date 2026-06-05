@@ -29,6 +29,7 @@ class AuthUser:
     nickname: str
     password_hash: str
     created_at: datetime
+    is_admin: bool = False
 
 
 class NicknameAlreadyExistsError(RuntimeError):
@@ -224,6 +225,7 @@ def _local_record_to_user(record: Dict[str, Any]) -> AuthUser:
         nickname=str(record.get("nickname") or ""),
         password_hash=str(record.get("password_hash") or ""),
         created_at=created_at,
+        is_admin=bool(record.get("is_admin") or False),
     )
 
 
@@ -480,6 +482,7 @@ def get_user_by_nickname(nickname: str) -> Optional[AuthUser]:
         nickname=str(row["nickname"]),
         password_hash=str(row["password_hash"]),
         created_at=row["created_at"],
+        is_admin=bool(row.get("is_admin") or False),
     )
 
 
@@ -626,6 +629,7 @@ def create_user(nickname: str, password: str) -> Optional[AuthUser]:
                     users_table.c.nickname,
                     users_table.c.password_hash,
                     users_table.c.created_at,
+                    users_table.c.is_admin,
                 )
             )
             row = session.execute(stmt).mappings().one()
@@ -637,6 +641,7 @@ def create_user(nickname: str, password: str) -> Optional[AuthUser]:
         nickname=str(row["nickname"]),
         password_hash=str(row["password_hash"]),
         created_at=row["created_at"],
+        is_admin=bool(row.get("is_admin") or False),
     )
 
 
@@ -711,6 +716,7 @@ def update_user_nickname(current_nickname: str, next_nickname: str) -> AuthUser:
         nickname=str(row["nickname"]),
         password_hash=str(row["password_hash"]),
         created_at=row["created_at"],
+        is_admin=bool(row.get("is_admin") or False),
     )
 
 
