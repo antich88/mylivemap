@@ -99,8 +99,8 @@
           <div class="filter-sheet__handle" aria-hidden="true"></div>
         </div>
     <main class="map-shell">
-      <div id="leaflet-map">
-        <div class="map-control-stack" ontouchstart="event.stopPropagation()" onmousedown="event.stopPropagation()">
+        <div id="leaflet-map">
+          <div class="map-control-stack">
           <button
             id="refresh-btn"
             class="refresh-btn"
@@ -309,6 +309,7 @@
                 <div class="password-collapse" data-password-state="collapsed">
                   <button class="user-panel__password-btn" type="button" data-password-action="toggle">Изменить пароль</button>
                   <form id="password-form" class="password-form" hidden autocomplete="off">
+                    <input type="text" name="username" value="{{ current_user.nickname if current_user else '' }}" autocomplete="username" style="display: none;" aria-hidden="true">
                     <label class="user-panel__field">
                       <span class="user-panel__label">Текущий пароль</span>
                       <input class="user-panel__input" name="current_password" type="password" autocomplete="current-password" minlength="6" />

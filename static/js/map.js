@@ -1778,12 +1778,15 @@ async function loadAndRenderInbox() {
       card.className = 'dialog-card';
 
       let startX = 0;
-      card.ontouchstart = (e) => { startX = e.touches[0].clientX; };
-      card.ontouchmove = (e) => {
+      card.addEventListener('touchstart', (e) => {
+        startX = e.touches[0].clientX;
+      }, { passive: true });
+
+      card.addEventListener('touchmove', (e) => {
         let diff = startX - e.touches[0].clientX;
         if (diff > 30) card.classList.add('is-swiped');
         if (diff < -30) card.classList.remove('is-swiped');
-      };
+      }, { passive: true });
 
       card.onclick = () => {
         if (card.classList.contains('is-swiped')) {
