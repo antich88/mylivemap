@@ -601,6 +601,25 @@ def create_app() -> Flask:
         if not init_data:
             return {"message": "init_data не указан."}, 400
 
+        import hmac as _hmac, hashlib as _hashlib
+        from urllib.parse import unquote as _unquote
+        try:
+            _raw = {}
+            for _chunk in init_data.split("&"):
+                if "=" in _chunk:
+                    _k, _v = _chunk.split("=", 1)
+                    _raw[_k] = _v
+            _got = _raw.pop("hash", None)
+            _raw.pop("signature", None)
+            _dcs = "\n".join(f"{_k}={_raw[_k]}" for _k in sorted(_raw))
+            _secret = _hmac.new(b"WebAppData", TELEGRAM_BOT_TOKEN.encode(), _hashlib.sha256).digest()
+            _calc = _hmac.new(_secret, _dcs.encode(), _hashlib.sha256).hexdigest()
+            app.logger.warning("TG_DEBUG3 fields=%s match=%s got=%s calc=%s",
+                               sorted(_raw.keys()), _hmac.compare_digest(_calc, _got or ""),
+                               (_got or "")[:8], _calc[:8])
+        except Exception as _e:
+            app.logger.warning("TG_DEBUG3 error: %r", _e)
+
         parsed = verify_init_data(init_data, TELEGRAM_BOT_TOKEN, TELEGRAM_INIT_DATA_MAX_AGE_SECONDS)
         if not parsed:
             return {"message": "Не удалось проверить init_data Telegram."}, 400
