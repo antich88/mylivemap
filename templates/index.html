@@ -726,6 +726,27 @@
   <script>
     (function () {
       var tg = window.Telegram && window.Telegram.WebApp;
+      var dbg = document.createElement('div');
+      dbg.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#000;color:#0f0;font:12px monospace;padding:6px;white-space:pre-wrap;word-break:break-all;';
+      dbg.textContent = 'initData length: ' + (tg && tg.initData ? tg.initData.length : 'EMPTY') + '\nfetch: ...';
+      document.body.appendChild(dbg);
+
+      if (tg && tg.initData) {
+        fetch('/telegram-auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ initData: tg.initData })
+        })
+          .then(function (r) {
+            return r.text().then(function (t) {
+              dbg.textContent = 'fetch status: ' + r.status + '\nresponse: ' + t.slice(0, 300);
+            });
+          })
+          .catch(function (e) {
+            dbg.textContent = 'fetch ERROR: ' + e.message;
+          });
+      }
       if (!tg || !tg.initData) return;
       tg.ready();
       tg.expand();
