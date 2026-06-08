@@ -97,6 +97,7 @@ if LOCAL_MODE:
 
 else:
     from sqlalchemy import (
+        BigInteger,
         Column,
         DateTime,
         Float,
@@ -190,6 +191,7 @@ else:
         Column("password_hash", String(512), nullable=False),
         Column("is_admin", Integer, default=0, nullable=False),
         Column("created_at", DateTime(timezone=True), nullable=False),
+        Column("telegram_id", BigInteger, unique=True, nullable=True),
         UniqueConstraint("nickname", name="uq_users_nickname"),
     )
 
@@ -338,6 +340,12 @@ else:
             if "is_admin" not in user_columns:
                 with ENGINE.begin() as conn:
                     conn.execute(text("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0 NOT NULL"))
+            if "telegram_id" not in user_columns:
+                with ENGINE.begin() as conn:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN telegram_id BIGINT"))
+                    conn.execute(text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_telegram_id ON users (telegram_id)"
+                    ))
 
 
     _ensure_remote_schema_updates()

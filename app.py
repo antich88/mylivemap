@@ -32,6 +32,8 @@ from auth_store import (
     create_user,
     get_or_create_user_profile,
     get_user_by_nickname,
+    get_user_by_telegram_id,
+    get_or_create_telegram_user,
     get_user_subscriptions,
     get_user_followers_count,
     remove_user_subscription,
@@ -61,7 +63,10 @@ from config import (
     MAX_AVATAR_FILE_SIZE,
     SECRET_KEY,
     SHARING_META,
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_INIT_DATA_MAX_AGE_SECONDS,
 )
+from telegram_auth import get_user_from_init_data, verify_init_data
 from database import (
     LOCAL_MODE,
     _LOCAL_MESSAGES_STORE,
@@ -577,6 +582,50 @@ def create_app() -> Flask:
             return {"message": "Не удалось выполнить вход. Попробуйте позже."}, 500
         if not user:
             return {"message": "Неверные имя пользователя или пароль."}, 401
+
+        session["user_nickname"] = user.nickname
+        session["is_admin"] = bool(user.is_admin)
+        return {"user": _build_user_state(user.nickname)}, 200
+
+    @app.route("/telegram-auth", methods=["POST"])
+    def telegram_auth_route() -> tuple[dict, int]:
+        if not TELEGRAM_BOT_TOKEN:
+            return {"message": "Telegram auth is not configured."}, 503
+        payload = request.get_json(silent=True)
+        init_data = ""
+        if isinstance(payload, dict):
+            init_data = payload.get("init_data") or payload.get("initData") or ""
+        if not init_data:
+            init_data = request.values.get("init_data") or request.values.get("initData") or ""
+        init_data = str(init_data or "").strip()
+        if not init_data:
+            return {"message": "init_data не указан."}, 400
+
+        parsed = verify_init_data(init_data, TELEGRAM_BOT_TOKEN, TELEGRAM_INIT_DATA_MAX_AGE_SECONDS)
+        if not parsed:
+            return {"message": "Не удалось проверить init_data Telegram."}, 400
+
+        telegram_user = get_user_from_init_data(parsed)
+        if not telegram_user:
+            return {"message": "Не удалось извлечь данные пользователя Telegram."}, 400
+
+        telegram_id = telegram_user.get("id")
+        if telegram_id is None:
+            return {"message": "Telegram ID отсутствует."}, 400
+        try:
+            telegram_id = int(telegram_id)
+        except (TypeError, ValueError):
+            return {"message": "Некорректный Telegram ID."}, 400
+
+        try:
+            user = get_or_create_telegram_user(
+                telegram_id=telegram_id,
+                username=telegram_user.get("username"),
+                first_name=telegram_user.get("first_name"),
+            )
+        except Exception as exc:
+            app.logger.exception("Telegram auth provisioning failed for telegram_id=%s: %s", telegram_id, exc)
+            return {"message": "Не удалось создать пользователя."}, 500
 
         session["user_nickname"] = user.nickname
         session["is_admin"] = bool(user.is_admin)

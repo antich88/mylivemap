@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -484,6 +485,133 @@ def get_user_by_nickname(nickname: str) -> Optional[AuthUser]:
         created_at=row["created_at"],
         is_admin=bool(row.get("is_admin") or False),
     )
+
+
+def get_user_by_telegram_id(telegram_id: int) -> Optional[AuthUser]:
+    if telegram_id is None:
+        return None
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        for record in snapshot.get("users", []):
+            try:
+                stored = record.get("telegram_id")
+                if stored is None:
+                    continue
+                if int(stored) == int(telegram_id):
+                    return _local_record_to_user(record)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    from sqlalchemy import select
+
+    with session_scope() as session:
+        stmt = select(users_table).where(users_table.c.telegram_id == int(telegram_id)).limit(1)
+        row = session.execute(stmt).mappings().first()
+    if not row:
+        return None
+    return AuthUser(
+        id=int(row["id"]),
+        nickname=str(row["nickname"]),
+        password_hash=str(row["password_hash"]),
+        created_at=row["created_at"],
+        is_admin=bool(row.get("is_admin") or False),
+    )
+
+
+def _sanitize_telegram_candidate(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    cleaned = "".join(ch for ch in raw.strip().lower() if ch.isalnum() or ch == "_")
+    return cleaned[:16] if cleaned else None
+
+
+def _make_telegram_nickname(base: str | None, telegram_id: int) -> str:
+    candidate = _sanitize_telegram_candidate(base)
+    if not candidate or len(candidate) < 3:
+        candidate = f"tg{int(telegram_id)}"
+    candidate = candidate[:16]
+    attempt = 0
+    while get_user_by_nickname(candidate):
+        suffix = secrets.token_hex(2)
+        trim_len = max(1, 16 - len(suffix) - 1)
+        prefix = candidate[:trim_len]
+        candidate = f"{prefix}_{suffix}"[:16]
+        attempt += 1
+        if attempt > 6:
+            candidate = f"tg{int(telegram_id)}"
+            candidate = candidate[:16]
+    if len(candidate) < 3:
+        candidate = f"tg{int(telegram_id)}"[:16]
+    return candidate
+
+
+def get_or_create_telegram_user(telegram_id: int, username: str | None = None, first_name: str | None = None) -> AuthUser:
+    if telegram_id is None:
+        raise ValueError("telegram_id is required")
+    existing = get_user_by_telegram_id(telegram_id)
+    if existing:
+        return existing
+
+    preferred = username or first_name
+    nickname = _make_telegram_nickname(preferred, telegram_id)
+    password_hash = generate_password_hash(secrets.token_urlsafe(16), method="pbkdf2:sha256")
+    created_at = datetime.now(timezone.utc)
+
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        users = list(snapshot.get("users", []))
+        last_id = int(snapshot.get("last_id", 0)) + 1
+        record = {
+            "id": last_id,
+            "nickname": nickname,
+            "password_hash": password_hash,
+            "created_at": created_at.isoformat(),
+            "telegram_id": int(telegram_id),
+        }
+        users.append(record)
+        snapshot["users"] = users
+        snapshot["last_id"] = last_id
+        _LOCAL_STORE.persist(snapshot)
+        user = _local_record_to_user(record)
+    else:
+        from sqlalchemy import insert
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            with session_scope() as session:
+                stmt = (
+                    insert(users_table)
+                    .values(
+                        nickname=nickname,
+                        password_hash=password_hash,
+                        created_at=created_at,
+                        telegram_id=int(telegram_id),
+                    )
+                    .returning(
+                        users_table.c.id,
+                        users_table.c.nickname,
+                        users_table.c.password_hash,
+                        users_table.c.created_at,
+                        users_table.c.is_admin,
+                    )
+                )
+                row = session.execute(stmt).mappings().one()
+        except IntegrityError:
+            existing = get_user_by_telegram_id(telegram_id)
+            if existing:
+                return existing
+            raise
+        user = AuthUser(
+            id=int(row["id"]),
+            nickname=str(row["nickname"]),
+            password_hash=str(row["password_hash"]),
+            created_at=row["created_at"],
+            is_admin=bool(row.get("is_admin") or False),
+        )
+
+    get_or_create_user_profile(user.nickname)
+    return user
 
 
 # --- Reputation helpers ---

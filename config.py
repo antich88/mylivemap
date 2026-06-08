@@ -19,6 +19,13 @@ def _parse_bool_env(value: str | None, default: bool = False) -> bool:
         return default
     normalized = value.strip().lower()
     return normalized in {"1", "true", "yes", "on"}
+
+
+def _parse_int_env(value: str | None, default: int) -> int:
+    try:
+        return int(value or default)
+    except (TypeError, ValueError):
+        return default
 DB_DIR_PATH = os.path.join(BASE_DIR, "data")
 os.makedirs(DB_DIR_PATH, exist_ok=True)
 DB_DIR = Path(DB_DIR_PATH)
@@ -190,6 +197,10 @@ SHARING_META = {
     "site_name": "Живая карта интересов",
     "default_image": "https://example.com/static/img/og-default.png",
 }
+
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_INIT_DATA_MAX_AGE_SECONDS = _parse_int_env(os.getenv("TELEGRAM_INIT_DATA_MAX_AGE_SECONDS"), 86_400)
 
 
 def is_local_mode() -> bool:
