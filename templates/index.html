@@ -735,6 +735,14 @@
       var tgPlatform = tg.platform || '';
       if (['tdesktop', 'macos', 'weba', 'webk', 'web'].indexOf(tgPlatform) !== -1) {
         document.body.classList.add('tg-desktop');
+        var applyTgHeight = function () {
+          var h = tg.viewportStableHeight || tg.viewportHeight;
+          if (h) document.documentElement.style.setProperty('--tg-stable-height', h + 'px');
+        };
+        applyTgHeight();
+        if (tg.onEvent) {
+          tg.onEvent('viewportChanged', applyTgHeight);
+        }
       }
       try {
         var boot = JSON.parse(document.getElementById('live-map-bootstrap').textContent);
