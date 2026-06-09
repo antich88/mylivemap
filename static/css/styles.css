@@ -5208,3 +5208,15 @@ body.tg-mobile.keyboard-open .leaflet-popup-content {
   max-height: 60vh;
   overflow-y: auto;
 }
+
+/* Telegram: попап метки в пределах вьюпорта, с учётом клавиатуры */
+body.tg-desktop #author-sheet,
+body.tg-mobile #author-sheet {
+  max-height: calc(var(--tg-stable-height, 100vh) - 80px) !important;
+}
+
+/* При открытой клавиатуре ужимаем сильнее, чтобы поле ввода было видно */
+body.tg-desktop.keyboard-open #author-sheet,
+body.tg-mobile.keyboard-open #author-sheet {
+  max-height: calc(var(--tg-stable-height, 100vh) - 40px) !important;
+}
