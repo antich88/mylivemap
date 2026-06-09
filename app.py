@@ -111,6 +111,8 @@ USER_LIMIT_MESSAGE = (
 def create_app() -> Flask:
     app = Flask(__name__, static_folder="static", template_folder="templates")
     app.secret_key = SECRET_KEY
+    app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+    app.config['SESSION_COOKIE_SECURE'] = True
 
     cloudinary_url = os.getenv("CLOUDINARY_URL") or CLOUDINARY_URL
     cloudinary_creds = {

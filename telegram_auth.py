@@ -10,19 +10,20 @@ def verify_init_data(init_data: str, bot_token: str, max_age_seconds: int = 8640
     if not init_data or not bot_token:
         return None
 
-    pairs = {}
+    # Разбираем БЕЗ декодирования: значения должны остаться сырыми для проверки подписи
+    raw_pairs = {}
     for chunk in init_data.split('&'):
         if '=' in chunk:
             key, value = chunk.split('=', 1)
-            pairs[key] = unquote(value)
+            raw_pairs[key] = value
 
-    received_hash = pairs.pop('hash', None)
-    pairs.pop('signature', None)
-
+    received_hash = raw_pairs.pop('hash', None)
+    raw_pairs.pop('signature', None)
     if not received_hash:
         return None
 
-    data_check_string = '\n'.join(f"{k}={pairs[k]}" for k in sorted(pairs))
+    # data_check_string строится из СЫРЫХ (не декодированных) значений
+    data_check_string = '\n'.join(f"{k}={raw_pairs[k]}" for k in sorted(raw_pairs))
 
     clean_token = bot_token.strip()
     secret_key = hmac.new(b"WebAppData", clean_token.encode('utf-8'), hashlib.sha256).digest()
@@ -31,7 +32,10 @@ def verify_init_data(init_data: str, bot_token: str, max_age_seconds: int = 8640
     if not hmac.compare_digest(computed_hash, received_hash):
         return None
 
-    auth_date = pairs.get('auth_date')
+    # Подпись верна — теперь декодируем значения для возврата
+    decoded = {k: unquote(v) for k, v in raw_pairs.items()}
+
+    auth_date = decoded.get('auth_date')
     if auth_date:
         try:
             if time.time() - int(auth_date) > max_age_seconds:
@@ -39,7 +43,7 @@ def verify_init_data(init_data: str, bot_token: str, max_age_seconds: int = 8640
         except (ValueError, TypeError):
             return None
 
-    return pairs
+    return decoded
 
 
 def get_user_from_init_data(parsed: Dict[str, str]) -> Optional[Dict[str, object]]:
