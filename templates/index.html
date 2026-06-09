@@ -511,7 +511,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js" defer></script>
   <script src="{{ url_for('static', filename='js/map.js') }}" defer></script>
   <script>
-    document.addEventListener('DOMContentLoaded', () => {
+    function initLiveMapUI() {
       const overlayStack = document.querySelector('.view-overlay-stack');
       const navButtons = Array.from(document.querySelectorAll('.bottom-nav__item'));
       const viewScreens = Array.from(document.querySelectorAll('[data-view-screen]'));
@@ -719,7 +719,12 @@
           closeFilterSheet();
         }
       });
-    });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initLiveMapUI);
+    } else {
+      initLiveMapUI();
+    }
   </script>
   <script>
     (function () {

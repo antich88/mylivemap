@@ -5172,11 +5172,21 @@ body.tg-desktop .bottom-nav {
   width: 100%;
   box-sizing: border-box;
   padding-bottom: 0.6rem;
-  z-index: 10000;
-  pointer-events: auto;
+  z-index: 2147483647;
+  pointer-events: auto !important;
+  isolation: isolate;
 }
 
-body.tg-desktop .bottom-nav__item {
+body.tg-desktop .bottom-nav * {
+  pointer-events: auto !important;
+}
+
+body.tg-desktop .map-shell,
+body.tg-desktop #map,
+body.tg-desktop #leaflet-map,
+body.tg-desktop .leaflet-container,
+body.tg-desktop .leaflet-pane,
+body.tg-desktop .leaflet-control-container {
   pointer-events: auto;
 }
 
