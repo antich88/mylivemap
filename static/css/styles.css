@@ -198,6 +198,15 @@ html {
   display: none !important;
 }
 
+.password-collapse[hidden] {
+  display: none !important;
+}
+
+.password-form:not([hidden]) {
+  display: flex !important;
+  flex-direction: column;
+}
+
 .is-hidden {
   display: none !important;
 }

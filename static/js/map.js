@@ -3723,10 +3723,17 @@ function initProfileSettings() {
       passwordToggleBtn?.setAttribute('aria-pressed', String(expanded));
     }
     // Переключение блоков пароля: установка (если пароль не задан) vs смена
-    const hasPassword = currentAuthUser ? currentAuthUser.has_password !== false : true;
+    const passwordIsSet = !!(currentAuthUser && currentAuthUser.has_password === true);
     const changeBlock = document.querySelector('.password-collapse[data-password-state]');
-    if (changeBlock) changeBlock.hidden = !hasPassword;
-    if (setPasswordCollapse) setPasswordCollapse.hidden = hasPassword;
+    if (changeBlock) {
+      changeBlock.hidden = !passwordIsSet;
+    }
+    if (setPasswordCollapse) {
+      setPasswordCollapse.hidden = passwordIsSet;
+      if (passwordIsSet && setPasswordForm) {
+        setPasswordForm.hidden = true;
+      }
+    }
   };
 
   const friendsSearchPanel = profileSection?.querySelector('.user-panel__friends.search-panel');
