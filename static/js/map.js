@@ -4675,6 +4675,43 @@ window.addEventListener('load', function () {
     }
   });
 
+  // Смещение полей шторки создания метки над клавиатурой (Telegram WebApp)
+  document.addEventListener('focusin', (event) => {
+    const field = event.target;
+    if (!field || !field.closest('.create-sheet')) return;
+    if (!field.matches('input, textarea, select')) return;
+
+    setTimeout(() => {
+      const vv = window.visualViewport;
+      const viewportHeight = vv ? vv.height : window.innerHeight;
+      const rect = field.getBoundingClientRect();
+      const overlap = rect.bottom - viewportHeight + 24;
+      if (overlap > 0) {
+        const sheet = field.closest('.create-sheet');
+        if (sheet) {
+          sheet.scrollTop += overlap;
+        } else {
+          field.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
+      }
+    }, 350);
+  });
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => {
+      const active = document.activeElement;
+      if (active && active.closest && active.closest('.create-sheet') && active.matches('input, textarea, select')) {
+        const vv = window.visualViewport;
+        const rect = active.getBoundingClientRect();
+        const overlap = rect.bottom - vv.height + 24;
+        if (overlap > 0) {
+          const sheet = active.closest('.create-sheet');
+          if (sheet) sheet.scrollTop += overlap;
+        }
+      }
+    });
+  }
+
   const chatNavButtons = document.querySelectorAll('.bottom-nav__item[data-nav-target="chats"]');
   chatNavButtons.forEach((button) => {
     button.addEventListener('click', () => {
