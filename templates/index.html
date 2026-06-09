@@ -720,10 +720,10 @@
         }
       });
     }
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initLiveMapUI);
-    } else {
+    if (document.readyState === 'complete') {
       initLiveMapUI();
+    } else {
+      window.addEventListener('load', initLiveMapUI, { once: true });
     }
   </script>
   <script>
