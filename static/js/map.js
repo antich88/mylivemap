@@ -3576,6 +3576,10 @@ function initProfileSettings() {
   const profileSection = document.querySelector('.user-panel');
   const profileForm = document.getElementById('profile-form');
   const passwordForm = document.getElementById('password-form');
+  const setPasswordForm = document.getElementById('set-password-form');
+  const setPasswordCollapse = document.querySelector('[data-setpassword-state]');
+  const setPasswordToggleBtn = document.querySelector('[data-setpassword-action="toggle"]');
+  const setPasswordCancelBtn = document.querySelector('[data-setpassword-action="cancel"]');
   const avatarInput = document.getElementById('profile-avatar-input');
   const avatarPreview = document.querySelector('.profile-avatar__image');
   const avatarPlaceholder = avatarPreview?.querySelector('.profile-avatar__placeholder');
@@ -3705,9 +3709,9 @@ function initProfileSettings() {
     }
     profileSection.classList.toggle('user-panel--editing', isEdit);
 
-     const collapse = document.querySelector('.password-collapse');
-    if (collapse) {
-      collapse.dataset.passwordState = passwordState;
+      const collapse = document.querySelector('.password-collapse[data-password-state]');
+      if (collapse) {
+        collapse.dataset.passwordState = passwordState;
       const expanded = passwordState === 'expanded';
       if (passwordForm) {
         passwordForm.hidden = !expanded;
@@ -3718,6 +3722,11 @@ function initProfileSettings() {
       passwordToggleBtn?.setAttribute('aria-expanded', String(expanded));
       passwordToggleBtn?.setAttribute('aria-pressed', String(expanded));
     }
+    // Переключение блоков пароля: установка (если пароль не задан) vs смена
+    const hasPassword = currentAuthUser ? currentAuthUser.has_password !== false : true;
+    const changeBlock = document.querySelector('.password-collapse[data-password-state]');
+    if (changeBlock) changeBlock.hidden = !hasPassword;
+    if (setPasswordCollapse) setPasswordCollapse.hidden = hasPassword;
   };
 
   const friendsSearchPanel = profileSection?.querySelector('.user-panel__friends.search-panel');
@@ -3970,7 +3979,7 @@ function initProfileSettings() {
     });
 
   passwordToggleBtn?.addEventListener('click', () => {
-      const currentState = document.querySelector('.password-collapse')?.dataset.passwordState || 'collapsed';
+      const currentState = document.querySelector('.password-collapse[data-password-state]')?.dataset.passwordState || 'collapsed';
       setPasswordState(currentState === 'collapsed' ? 'expanded' : 'collapsed');
     });
 
@@ -3982,6 +3991,65 @@ function initProfileSettings() {
   passwordForm?.addEventListener('submit', (event) => {
     event.preventDefault();
     submitPasswordForm();
+  });
+
+  setPasswordToggleBtn?.addEventListener('click', () => {
+    if (!setPasswordForm) {
+      return;
+    }
+    const isHidden = setPasswordForm.hidden;
+    setPasswordForm.hidden = !isHidden;
+    if (setPasswordForm.hidden) {
+      setPasswordForm.reset();
+    }
+  });
+
+  setPasswordCancelBtn?.addEventListener('click', () => {
+    if (!setPasswordForm) {
+      return;
+    }
+    setPasswordForm.hidden = true;
+    setPasswordForm.reset();
+  });
+
+  setPasswordForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const fd = new FormData(setPasswordForm);
+    const np = fd.get('new_password');
+    const npc = fd.get('new_password_confirm');
+    if (!np || String(np).length < 6) {
+      showUserToast('Пароль должен быть не короче 6 символов.');
+      return;
+    }
+    if (np !== npc) {
+      showUserToast('Пароли не совпадают.');
+      return;
+    }
+    fetch('/profile/set-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ new_password: np }),
+    })
+      .then(handleJsonResponse)
+      .then((data) => {
+        showUserToast((data && data.message) || 'Пароль установлен.');
+        setPasswordForm.reset();
+        setPasswordForm.hidden = true;
+        if (currentAuthUser) {
+          currentAuthUser.has_password = true;
+        }
+        if (setPasswordCollapse) {
+          setPasswordCollapse.hidden = true;
+        }
+        const changeBlock = document.querySelector('.password-collapse[data-password-state]');
+        if (changeBlock) {
+          changeBlock.hidden = false;
+        }
+      })
+      .catch((error) => {
+        showUserToast((error && error.message) || 'Не удалось установить пароль.');
+      });
   });
 
   avatarUploadBtn?.addEventListener('click', () => {

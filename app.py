@@ -41,6 +41,7 @@ from auth_store import (
     update_user_avatar_path,
     update_user_nickname,
     update_user_password,
+    set_initial_password,
     update_user_profile_fields,
     verify_user_credentials,
     adjust_user_reputation,
@@ -240,7 +241,15 @@ def create_app() -> Flask:
             "profile": None,
             "subscriptions": [],
             "followers_count": 0,
+            "has_password": False,
         }
+
+        def _refresh_password_flag() -> None:
+            try:
+                _u = get_user_by_nickname(nickname)
+                base["has_password"] = bool(_u and _u.password_hash)
+            except Exception:
+                base["has_password"] = False
         # На сервере форсируем работу с реальной СУБД, игнорируя LOCAL_MODE для стейта
         if LOCAL_MODE and not os.getenv("DATABASE_URL"):
             base["rating_total"] = get_user_rating_total(nickname)
@@ -269,6 +278,7 @@ def create_app() -> Flask:
                 base["followers_count"] = get_user_followers_count(nickname)
             except Exception:  # pragma: no cover
                 base["followers_count"] = 0
+            _refresh_password_flag()
             return base
 
         try:
@@ -329,6 +339,7 @@ def create_app() -> Flask:
                 row = session.execute(profile_stmt).mappings().first()
                 if not row:
                     app.logger.warning("Profile row missing for %s after ensure, skipping data aggregation", nickname)
+                    _refresh_password_flag()
                     return base
 
                 profile_data = dict(row)
@@ -362,6 +373,9 @@ def create_app() -> Flask:
             app.logger.exception("_build_user_state failed for %s: %s", nickname, exc)
             base["subscriptions"] = []
             base["followers_count"] = 0
+            _refresh_password_flag()
+            return base
+        _refresh_password_flag()
         return base
 
     def _build_author_preview(nickname: str) -> dict:
@@ -805,6 +819,21 @@ def create_app() -> Flask:
         except ValueError as exc:
             return {"message": str(exc)}, 400
         return {"message": "Пароль обновлён."}, 200
+
+    @app.route("/profile/set-password", methods=["POST"])
+    def set_profile_password() -> tuple[dict, int]:
+        current_user = current_user_payload()
+        if not current_user:
+            return {"message": "Нужно войти в аккаунт."}, 401
+        payload = request.get_json(silent=True) or {}
+        new_password = str(payload.get("new_password") or "")
+        if len(new_password) < 6:
+            return {"message": "Пароль должен быть не короче 6 символов."}, 400
+        try:
+            set_initial_password(current_user["nickname"], new_password)
+        except ValueError as exc:
+            return {"message": str(exc)}, 400
+        return {"message": "Пароль установлен. Теперь можно входить через сайт."}, 200
 
     @app.route("/api/pins", methods=["GET", "POST"])
     def refresh_or_create_pin():

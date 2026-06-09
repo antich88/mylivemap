@@ -458,6 +458,44 @@ def update_user_password(nickname: str, current_password: str, new_password: str
         session.execute(stmt)
 
 
+def set_initial_password(nickname: str, new_password: str) -> None:
+    """Устанавливает пароль пользователю, у которого он ещё не задан (telegram-вход).
+    Работает только если текущий password_hash пустой — чтобы нельзя было перезаписать
+    существующий пароль без знания старого."""
+    normalized = _normalize_nickname(nickname)
+    if not normalized:
+        raise ValueError("Некорректное имя пользователя.")
+    if len(new_password or "") < 6:
+        raise ValueError("Пароль должен быть не короче 6 символов.")
+    user = get_user_by_nickname(normalized)
+    if not user:
+        raise ValueError("Пользователь не найден.")
+    if user.password_hash:
+        # пароль уже задан — нельзя перезаписать без проверки старого
+        raise ValueError("Пароль уже установлен. Используйте смену пароля.")
+    new_hash = generate_password_hash(new_password, method="pbkdf2:sha256")
+    if LOCAL_MODE:
+        snapshot = _LOCAL_STORE.snapshot()
+        users = list(snapshot.get("users", []))
+        for record in users:
+            if str(record.get("nickname") or "") != normalized:
+                continue
+            record["password_hash"] = new_hash
+            snapshot["users"] = users
+            _LOCAL_STORE.persist(snapshot)
+            return
+        raise ValueError("Пользователь не найден.")
+
+    from sqlalchemy import update
+    with session_scope() as session:
+        stmt = (
+            update(users_table)
+            .where(users_table.c.id == user.id)
+            .values(password_hash=new_hash)
+        )
+        session.execute(stmt)
+
+
 def get_user_by_nickname(nickname: str) -> Optional[AuthUser]:
     normalized = _normalize_nickname(nickname)
     if not normalized:
@@ -555,7 +593,7 @@ def get_or_create_telegram_user(telegram_id: int, username: str | None = None, f
 
     preferred = username or first_name
     nickname = _make_telegram_nickname(preferred, telegram_id)
-    password_hash = generate_password_hash(secrets.token_urlsafe(16), method="pbkdf2:sha256")
+    password_hash = ""  # пустой = пароль для веб-входа не задан, пользователь задаст его сам
     created_at = datetime.now(timezone.utc)
 
     if LOCAL_MODE:

@@ -330,6 +330,24 @@
                   </form>
                 </div>
 
+                <div class="password-collapse" data-setpassword-state="collapsed" hidden>
+                  <button class="user-panel__password-btn" type="button" data-setpassword-action="toggle">Установить пароль для входа через сайт</button>
+                  <form id="set-password-form" class="password-form" hidden autocomplete="off">
+                    <div class="user-panel__field">
+                      <label>Новый пароль</label>
+                      <input class="user-panel__input" name="new_password" type="password" autocomplete="new-password" minlength="6" />
+                    </div>
+                    <div class="user-panel__field">
+                      <label>Повторите пароль</label>
+                      <input class="user-panel__input" name="new_password_confirm" type="password" autocomplete="new-password" minlength="6" />
+                    </div>
+                    <div class="password-actions">
+                      <button type="button" class="profile-action profile-action--cancel" data-setpassword-action="cancel">Отмена</button>
+                      <button type="submit" class="profile-action profile-action--save" data-setpassword-action="save">Сохранить</button>
+                    </div>
+                  </form>
+                </div>
+
                 <div class="user-panel__active-pins" data-active-pins-section>
                   <div class="user-panel__active-pins-header">
                     <h3 class="user-panel__active-pins-title">Мои метки</h3>
