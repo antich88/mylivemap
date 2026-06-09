@@ -5196,6 +5196,38 @@ document.addEventListener('input', (event) => {
   }
 });
 
+// Отправка комментария с первого касания, затем скрытие клавиатуры
+['mousedown', 'touchstart'].forEach((evtName) => {
+  document.addEventListener(evtName, (event) => {
+    const btn = event.target.closest('.comment-send-btn');
+    if (!btn) {
+      return;
+    }
+    const form = btn.closest('.pin-comments__form-modern');
+    if (!form) {
+      return;
+    }
+    event.preventDefault();
+
+    const pinId = Number(form.dataset.pinId);
+    const input = form.querySelector('input[name="comment"]');
+    if (!pinId || !input) {
+      return;
+    }
+    const text = input.value.trim();
+    if (!text) {
+      return;
+    }
+    if (text.length > COMMENT_MAX_LENGTH) {
+      showUserToast(`Комментарий не должен превышать ${COMMENT_MAX_LENGTH} символов.`);
+      return;
+    }
+    submitComment(pinId, text, form, input);
+    input.blur();
+    document.body.classList.remove('keyboard-open');
+  }, { passive: false });
+});
+
 document.addEventListener('submit', (event) => {
   const form = event.target.closest('.pin-comments__form-modern');
   if (!form) {

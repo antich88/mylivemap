@@ -5220,3 +5220,10 @@ body.tg-desktop.keyboard-open #author-sheet,
 body.tg-mobile.keyboard-open #author-sheet {
   max-height: calc(var(--tg-stable-height, 100vh) - 40px) !important;
 }
+
+/* Мобильные устройства: попап метки выше */
+@media (max-width: 768px) {
+  #author-sheet {
+    max-height: 80vh;
+  }
+}
