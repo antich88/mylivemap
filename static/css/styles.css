@@ -5163,33 +5163,10 @@ mask: radial-gradient(circle at center, transparent 31%, black 32%);
   transition: transform 0.2s ease;
 }
 
-/* Фикс нижнего меню для десктопного Telegram WebApp */
+/* Telegram Desktop: нижнее меню на всю ширину */
 body.tg-desktop .bottom-nav {
-  position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
   width: 100%;
   box-sizing: border-box;
-  padding-bottom: 0.6rem;
-  z-index: 2147483647;
-  pointer-events: auto !important;
-  isolation: isolate;
-}
-
-body.tg-desktop .bottom-nav * {
-  pointer-events: auto !important;
-}
-
-body.tg-desktop .map-shell,
-body.tg-desktop #map,
-body.tg-desktop #leaflet-map,
-body.tg-desktop .leaflet-container,
-body.tg-desktop .leaflet-pane,
-body.tg-desktop .leaflet-control-container {
-  pointer-events: auto;
-}
-
-body.tg-desktop {
-  height: var(--tg-stable-height, 100vh);
 }
