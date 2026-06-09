@@ -732,6 +732,9 @@
       if (!tg || !tg.initData) return;
       tg.ready();
       tg.expand();
+      if (typeof tg.disableVerticalSwipes === 'function') {
+        tg.disableVerticalSwipes();
+      }
       var tgPlatform = tg.platform || '';
       var isTgDesktop = ['tdesktop', 'macos', 'weba', 'webk', 'web'].indexOf(tgPlatform) !== -1;
       document.body.classList.add(isTgDesktop ? 'tg-desktop' : 'tg-mobile');
