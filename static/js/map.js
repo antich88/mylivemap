@@ -4653,30 +4653,6 @@ window.addEventListener('load', function () {
         commentsList.scrollTop = commentsList.scrollHeight;
       }
 
-      setTimeout(() => {
-        if (typeof map === 'undefined' || !map.panBy) {
-          return;
-        }
-
-        const inputRect = event.target.getBoundingClientRect();
-        const vv = window.visualViewport;
-        const viewportTop = vv ? vv.offsetTop : 0;
-        const viewportBottom = vv ? (vv.offsetTop + vv.height) : window.innerHeight;
-
-        // Целевая позиция нижнего края поля: на 24px выше клавиатуры
-        const targetBottom = viewportBottom - 24;
-        let shift = inputRect.bottom - targetBottom;
-
-        const safeTop = viewportTop + 90;
-        const maxShift = inputRect.top - safeTop;
-        if (shift > maxShift) {
-          shift = maxShift;
-        }
-
-        if (shift > 0) {
-          map.panBy([0, shift], { animate: true });
-        }
-      }, 300);
     }
   });
 
