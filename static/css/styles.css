@@ -5126,19 +5126,19 @@ mask: radial-gradient(circle at center, transparent 31%, black 32%);
 /* --- SMART HYBRID MARKERS --- */
 
 /* Стили для кружка с иконкой категории (когда нет аватарки) */
-.marker-status-dot.has-icon {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: var(--chip-color);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  border: 2px solid #ffffff !important;
-  box-shadow: 0 0 0 3px var(--chip-color), 0 4px 12px rgba(0, 0, 0, 0.4) !important;
-  flex-shrink: 0;
-}
+  .marker-status-dot.has-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--chip-color);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    border: 2px solid #ffffff !important;
+    box-shadow: 0 0 0 3px var(--chip-color), 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+    flex-shrink: 0;
+  }
 
 /* --- СОСТОЯНИЕ ОТДАЛЕНИЯ КАРТЫ (ZOOM < 15) --- */
 .map-zoomed-out .marker-text {
@@ -5161,4 +5161,25 @@ mask: radial-gradient(circle at center, transparent 31%, black 32%);
 .map-zoomed-out .marker-status-dot {
   transform: scale(1.1);
   transition: transform 0.2s ease;
+}
+
+/* Фикс нижнего меню для десктопного Telegram WebApp */
+body.tg-desktop .bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding-bottom: 0.6rem;
+  z-index: 10000;
+  pointer-events: auto;
+}
+
+body.tg-desktop .bottom-nav__item {
+  pointer-events: auto;
+}
+
+body.tg-desktop {
+  height: var(--tg-stable-height, 100vh);
 }
