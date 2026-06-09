@@ -5201,3 +5201,10 @@ body.tg-mobile .create-sheet {
   bottom: 0 !important;
   overflow-y: auto;
 }
+
+/* Telegram: при открытой клавиатуре ограничиваем высоту попапа метки */
+body.tg-desktop.keyboard-open .leaflet-popup-content,
+body.tg-mobile.keyboard-open .leaflet-popup-content {
+  max-height: 60vh;
+  overflow-y: auto;
+}
