@@ -5173,3 +5173,22 @@ body.tg-desktop .bottom-nav {
   top: var(--tg-stable-height, 100vh);
   transform: translateY(-100%);
 }
+
+/* Telegram Desktop: оверлей вкладок на всю ширину и высоту */
+body.tg-desktop .view-overlay-stack {
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  width: 100% !important;
+  height: var(--tg-stable-height, 100vh) !important;
+}
+
+/* Telegram Desktop: подсветка активной кнопки меню */
+body.tg-desktop .bottom-nav__item--active {
+  color: #4ade80 !important;
+}
+body.tg-desktop .bottom-nav__item--active svg,
+body.tg-desktop .bottom-nav__item--active .bottom-nav__icon {
+  color: #4ade80 !important;
+  stroke: #4ade80 !important;
+}
