@@ -4522,24 +4522,62 @@ function handleDeletePin(pinId) {
 }
 
 function findUserLocation() {
-  if (!navigator.geolocation) {
-    alert('Геолокация недоступна в вашем браузере.');
+  const tg = window.Telegram && window.Telegram.WebApp;
+  const inTelegram = !!(tg && tg.initData);
+
+  const onLocation = (latitude, longitude, accuracy) => {
+    showUserLocationMarker(latitude, longitude);
+    if (typeof accuracy === 'number' && accuracy > 0) {
+      updateUserAccuracyCircle(latitude, longitude, accuracy);
+    }
+    map.setView([latitude, longitude], 16, { animate: true });
+  };
+
+  const useBrowserGeolocation = () => {
+    if (!navigator.geolocation) {
+      showUserToast('Геолокация недоступна в вашем браузере.');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude, accuracy } = position.coords;
+        onLocation(latitude, longitude, accuracy);
+      },
+      (error) => {
+        console.error('Ошибка GPS:', error);
+        showUserToast('Не удалось определить местоположение. Проверьте доступ к геолокации.');
+        removeUserAccuracyCircle();
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  const lm = tg && tg.LocationManager;
+  if (inTelegram && lm && typeof lm.getLocation === 'function') {
+    const requestLoc = () => {
+      lm.getLocation((data) => {
+        if (data && typeof data.latitude === 'number') {
+          onLocation(data.latitude, data.longitude, data.horizontal_accuracy);
+        } else {
+          showUserToast('Разрешите доступ к геолокации в настройках Telegram.');
+          if (typeof lm.openSettings === 'function') {
+            lm.openSettings();
+          }
+          removeUserAccuracyCircle();
+        }
+      });
+    };
+    if (lm.isInited) {
+      requestLoc();
+    } else if (typeof lm.init === 'function') {
+      lm.init(() => { requestLoc(); });
+    } else {
+      requestLoc();
+    }
     return;
   }
-  navigator.geolocation.getCurrentPosition(
-    (position) => {
-      const { latitude, longitude, accuracy } = position.coords;
-      showUserLocationMarker(latitude, longitude);
-      updateUserAccuracyCircle(latitude, longitude, accuracy);
-      map.setView([latitude, longitude], 16, { animate: true });
-    },
-    (error) => {
-      console.error('Ошибка GPS:', error);
-      alert(`Ошибка: ${error.message} (Код: ${error.code})`);
-      removeUserAccuracyCircle();
-    },
-    { enableHighAccuracy: true, timeout: 10000 }
-  );
+
+  useBrowserGeolocation();
 }
 
 function closePinPopupIfOpen(pinId) {
