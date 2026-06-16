@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone, timedelta
 import json
 import logging
@@ -102,6 +102,50 @@ def _parse_metadata(raw: Any) -> Dict[str, Any]:
     return {}
 
 
+def _normalize_photos(raw_photos: Any) -> List[str]:
+    if isinstance(raw_photos, str):
+        try:
+            parsed = json.loads(raw_photos) if raw_photos else []
+        except json.JSONDecodeError:
+            return []
+        return [str(item) for item in parsed if item]
+    if isinstance(raw_photos, list):
+        normalized: List[str] = []
+        for entry in raw_photos:
+            if isinstance(entry, str) and entry:
+                normalized.append(entry)
+        return normalized
+    return []
+
+
+def _normalize_photos(raw_photos: Any) -> List[str]:
+    if isinstance(raw_photos, str):
+        try:
+            parsed = json.loads(raw_photos) if raw_photos else []
+        except json.JSONDecodeError:
+            return []
+        return [str(item) for item in parsed if item]
+    if isinstance(raw_photos, list):
+        return [str(item) for item in raw_photos if isinstance(item, str) and item]
+    return []
+
+
+def _normalize_photos(raw_photos: Any) -> List[str]:
+    if isinstance(raw_photos, str):
+        try:
+            parsed = json.loads(raw_photos) if raw_photos else []
+        except json.JSONDecodeError:
+            return []
+        return [str(item) for item in parsed if item]
+    if isinstance(raw_photos, list):
+        normalized: List[str] = []
+        for entry in raw_photos:
+            if isinstance(entry, str) and entry:
+                normalized.append(entry)
+        return normalized
+    return []
+
+
 def _normalize_votes(raw_votes: Any) -> List[Dict[str, Any]]:
     if not isinstance(raw_votes, list):
         return []
@@ -189,6 +233,7 @@ class Pin:
     metadata: Optional[Dict]
     shared_token: Optional[str]
     user_id: str
+    photos: List[str] = field(default_factory=list)
 
     @property
     def ttl_seconds(self) -> Optional[int]:
@@ -213,6 +258,7 @@ class Pin:
         payload["category"] = self.category
         payload["user_id"] = self.user_id
         payload["comments"] = getattr(self, "_preloaded_comments", [])
+        payload["photos"] = self.photos or []
         if vote_counts is not None:
             likes, dislikes = vote_counts
         else:
@@ -413,6 +459,7 @@ def _mapping_to_pin(row: Mapping[str, Any]) -> Pin:
         metadata=_ensure_metadata(metadata_payload),
         shared_token=row.get("shared_token"),
         user_id=str(row.get("user_id") or ""),
+        photos=list((metadata_payload or {}).get("photos") or []),
     )
 
 

@@ -103,6 +103,7 @@ else:
         Float,
         ForeignKey,
         Integer,
+        JSON,
         MetaData,
         String,
         Table,
@@ -178,6 +179,7 @@ else:
         Column("shared_token", String(255), unique=True),
         Column("user_id", String(255), nullable=False, default=""),
         Column("image_url", String(512)),
+        Column("photos", JSON, nullable=False, server_default=text("'[]'")),
         UniqueConstraint("shared_token", name="uq_pins_shared_token"),
     )
     Index("ix_pins_user_created", pins_table.c.user_id, pins_table.c.created_at)
@@ -319,6 +321,9 @@ else:
             if "image_url" not in pin_columns:
                 with ENGINE.begin() as conn:
                     conn.execute(text("ALTER TABLE pins ADD COLUMN image_url VARCHAR(512)"))
+            if "photos" not in pin_columns:
+                with ENGINE.begin() as conn:
+                    conn.execute(text("ALTER TABLE pins ADD COLUMN photos JSON DEFAULT '[]' NOT NULL"))
 
         # user_profiles: new reputation/level/verification fields
         if "user_profiles" in table_names:

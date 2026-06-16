@@ -493,6 +493,16 @@
             required
           ></textarea>
         </div>
+        <div class="create-field">
+          <label class="create-field__label">Фото (до 5 шт.)</label>
+          <div class="create-photo-upload">
+            <button type="button" class="create-photo-btn" id="create-photo-add-btn" aria-label="Добавить фото">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            </button>
+            <input type="file" id="create-photo-input" accept="image/*" multiple hidden />
+            <div class="create-photo-preview-list" id="create-photo-preview-list"></div>
+          </div>
+        </div>
 
       <!-- Контакт (обязательное) -->
         <div class="create-field">

@@ -7,10 +7,12 @@ eventlet.monkey_patch()  # Важно: патч должен идти в сам�
 import json
 import os
 import secrets
+import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import BinaryIO
+from PIL import Image
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, session, url_for
 from flask_socketio import SocketIO, join_room, leave_room, emit
@@ -109,9 +111,16 @@ USER_LIMIT_MESSAGE = (
 )
 
 
+PIN_PHOTO_UPLOAD_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "static", "uploads", "pins"
+)
+os.makedirs(PIN_PHOTO_UPLOAD_DIR, exist_ok=True)
+
+
 def create_app() -> Flask:
     app = Flask(__name__, static_folder="static", template_folder="templates")
     app.secret_key = SECRET_KEY
+    app.config["MAX_CONTENT_LENGTH"] = 60 * 1024 * 1024  # 60 МБ
     app.config['SESSION_COOKIE_SAMESITE'] = 'None'
     app.config['SESSION_COOKIE_SECURE'] = True
 
@@ -976,16 +985,16 @@ def create_app() -> Flask:
             response.headers["Cache-Control"] = "private, max-age=15"
             return response
 
-        payload = request.get_json()
-        if not payload:
+        data = request.form.to_dict()
+        if not data:
             abort(400)
-        category = payload.get("category") or payload.get("category_slug")
-        subcategory = payload.get("subcategory_slug")
-        nickname = payload.get("nickname")
-        description = payload.get("description")
-        lat = payload.get("lat")
-        lng = payload.get("lng")
-        contact = payload.get("contact")
+        category = data.get("category") or data.get("category_slug")
+        subcategory = data.get("subcategory_slug")
+        nickname = data.get("nickname")
+        description = data.get("description")
+        lat = data.get("lat")
+        lng = data.get("lng")
+        contact = data.get("contact")
         user = current_user_payload()
         if not all((category, subcategory, nickname, description, lat, lng)):
             abort(400)
@@ -997,10 +1006,40 @@ def create_app() -> Flask:
             response = jsonify({"message": USER_LIMIT_MESSAGE})
             response.status_code = 429
             return response
-        adjust_user_reputation(user_id, +1)
+        MAX_PHOTO_SIZE = 12 * 1024 * 1024  # 12 МБ на одно фото
+        files = request.files.getlist("photos")[:5]
+        saved_photos: list[str] = []
+        for index, file in enumerate(files):
+            if not file or not file.filename:
+                continue
+            file.seek(0, os.SEEK_END)
+            size = file.tell()
+            file.seek(0)
+            if size > MAX_PHOTO_SIZE:
+                continue
+            try:
+                img = Image.open(file)
+                img.verify()
+            except Exception:
+                continue
+            file.seek(0)
+            img = Image.open(file)
+            base_name = str(uuid.uuid4())
+            main_filename = f"{base_name}.webp"
+            full_path = os.path.join(PIN_PHOTO_UPLOAD_DIR, main_filename)
+            img.save(full_path, format="WEBP")
+            saved_photos.append(f"/static/uploads/pins/{main_filename}")
+            if index == 0:
+                thumb_filename = f"{base_name}_thumb.webp"
+                thumb = img.copy()
+                thumb.thumbnail((150, 150))
+                thumb.save(os.path.join(PIN_PHOTO_UPLOAD_DIR, thumb_filename), format="WEBP")
+                thumb.close()
+            img.close()
+
         pin = create_pin(
             category=category,
-            category_slug=payload.get("category_slug") or category,
+            category_slug=data.get("category_slug") or category,
             subcategory_slug=subcategory,
             nickname=nickname,
             description=description,
@@ -1008,9 +1047,11 @@ def create_app() -> Flask:
             lng=float(lng),
             contact=contact,
             user_id=user_id,
+            metadata={"photos": saved_photos},
         )
         if not pin:
             abort(500)
+        adjust_user_reputation(user_id, +1)
         return jsonify(pin.to_dict())
 
     @app.route("/api/pins/<int:pin_id>", methods=["GET"])
@@ -1505,6 +1546,29 @@ def create_app() -> Flask:
             abort(404)
         if owner != user_id:
             abort(403)
+        pin = get_pin_by_id(pin_id)
+        if pin:
+            def resolve_path(rel_path: str) -> str:
+                normalized = rel_path.strip()
+                if not normalized:
+                    return ""
+                if normalized.startswith("/static/"):
+                    normalized = normalized[len("/static/"):]
+                return os.path.join(app.static_folder, normalized.lstrip("/"))
+
+            for photo_path in pin.photos or []:
+                full_path = resolve_path(photo_path)
+                if full_path:
+                    try:
+                        os.remove(full_path)
+                    except FileNotFoundError:
+                        pass
+                thumb_path = resolve_path(photo_path.replace(".webp", "_thumb.webp"))
+                if thumb_path:
+                    try:
+                        os.remove(thumb_path)
+                    except FileNotFoundError:
+                        pass
         deleted = delete_pin(pin_id, user_id)
         if not deleted:
             abort(500)

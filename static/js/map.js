@@ -135,6 +135,7 @@ let createSheetState = {
   latlng: null,
   selectedCategorySlug: null,
   selectedSubcategorySlug: null,
+  photos: [],
 };
 let currentAuthorSheetPinId = null;
 let currentCommentRoomPinId = null;
@@ -421,6 +422,11 @@ function resetCreateSheetState() {
   createSheetState.latlng = null;
   createSheetState.selectedCategorySlug = null;
   createSheetState.selectedSubcategorySlug = null;
+  createSheetState.photos = [];
+  const previewList = document.getElementById('create-photo-preview-list');
+  if (previewList) {
+    previewList.innerHTML = '';
+  }
   closeCreateCategoryDropdown();
 }
 
@@ -2421,6 +2427,18 @@ function createPopupContent(pin) {
     `
     : '';
 
+  const photosMarkup = (pin.photos && pin.photos.length)
+    ? `<div class="pin-detail-card__photos">
+         ${pin.photos
+           .map((p) => `
+             <a href="${escapeHtml(p)}" target="_blank" rel="noopener" class="pin-detail-card__photo">
+               <img src="${escapeHtml(p)}" alt="Фото метки" loading="lazy" />
+             </a>
+           `)
+           .join('')}
+       </div>`
+    : '';
+
   return `
     <div class="pin-popup pin-detail-card" data-pin-id="${pin.id}">
       <header class="pin-detail-card__header">
@@ -2459,6 +2477,7 @@ function createPopupContent(pin) {
 
       <b class="pin-popup__title">${escapeHtml(pin.nickname || pin.title || 'Метка')}</b>
       <span class="pin-popup__description">${escapeHtml(pin.description || 'Описание отсутствует.')}</span>
+      ${photosMarkup}
       ${renderContactRow(pin.contact)}
 
       <section class="pin-detail-card__discussion pin-comments" data-pin-id="${pin.id}">
@@ -4345,16 +4364,20 @@ function handleCreateSheetSubmit(event) {
     return;
   }
 
-  const payload = {
-    category: selectedCategory,
-    category_slug: selectedCategory,
-    subcategory_slug: selectedSubcategory,
-    nickname,
-    description: description || '',
-    contact: contact || null,
-    lat: latlng.lat,
-    lng: latlng.lng,
-  };
+  const formData = new FormData();
+  formData.append('category', selectedCategory);
+  formData.append('category_slug', selectedCategory);
+  formData.append('subcategory_slug', selectedSubcategory);
+  formData.append('nickname', nickname);
+  formData.append('description', description || '');
+  formData.append('contact', contact || '');
+  formData.append('lat', String(latlng.lat));
+  formData.append('lng', String(latlng.lng));
+
+  createSheetState.photos.forEach((blob, index) => {
+    const fileName = `photo-${Date.now()}-${index}.webp`;
+    formData.append('photos', blob, fileName);
+  });
 
   const originalText = submitButton?.textContent;
   if (submitButton) {
@@ -4364,11 +4387,8 @@ function handleCreateSheetSubmit(event) {
 
   fetch('/api/pins', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
     credentials: 'same-origin',
-    body: JSON.stringify(payload),
+    body: formData,
   })
     .then((response) => {
       if (!response.ok) {
@@ -4383,7 +4403,6 @@ function handleCreateSheetSubmit(event) {
       return response.json();
     })
     .then((pin) => {
-      // Подставляем данные текущего пользователя, если сервер их не вернул
       if (!pin.author) {
         pin.author = {};
       }
@@ -4397,7 +4416,6 @@ function handleCreateSheetSubmit(event) {
       if (!pin.author.reputation_level && currentAuthUser && currentAuthUser.reputation_level) {
         pin.author.reputation_level = currentAuthUser.reputation_level;
       }
-      
       addPinToMap(pin);
       closeCreateSheet();
       fetchPins();
@@ -4417,6 +4435,73 @@ function handleCreateSheetSubmit(event) {
     });
 }
 
+const photoAddBtn = document.getElementById('create-photo-add-btn');
+const photoInput = document.getElementById('create-photo-input');
+const photoPreviewList = document.getElementById('create-photo-preview-list');
+
+if (photoAddBtn && photoInput) {
+  photoAddBtn.addEventListener('click', () => photoInput.click());
+  photoInput.addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (createSheetState.photos.length + files.length > 5) {
+      alert('Максимум 5 фото');
+      return;
+    }
+    for (const file of files) {
+      const compressedBlob = await compressImageToWebP(file);
+      createSheetState.photos.push(compressedBlob);
+      renderPhotoPreviews();
+    }
+    photoInput.value = '';
+  });
+}
+
+function renderPhotoPreviews() {
+  if (!photoPreviewList) return;
+  photoPreviewList.innerHTML = '';
+  createSheetState.photos.forEach((blob, index) => {
+    const url = URL.createObjectURL(blob);
+    const item = document.createElement('div');
+    item.className = 'create-photo-item';
+    item.innerHTML = `<img src="${url}"><button type="button" class="create-photo-remove" data-index="${index}">×</button>`;
+    photoPreviewList.appendChild(item);
+  });
+  photoPreviewList.querySelectorAll('.create-photo-remove').forEach((btn) => {
+    btn.addEventListener('click', (event) => {
+      const index = Number(event.currentTarget.dataset.index);
+      createSheetState.photos.splice(index, 1);
+      renderPhotoPreviews();
+    });
+  });
+}
+
+function compressImageToWebP(file, maxSize = 1200) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let { width, height } = img;
+        if (width > height && width > maxSize) {
+          height *= maxSize / width;
+          width = maxSize;
+        } else if (height > maxSize) {
+          width *= maxSize / height;
+          height = maxSize;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => resolve(blob || file), 'image/webp', 0.8);
+      };
+      img.src = e.target?.result || '';
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function createMarkerLabelIcon(pin) {
   const category = getCategoryBySlug(pin.category_slug);
   const categoryColor = category?.color || pin.color || '#ffffff';
@@ -4426,7 +4511,11 @@ function createMarkerLabelIcon(pin) {
   const opacities = computeOpacityFromTTL(pin.ttl_seconds);
   const currentOpacity = opacities.strokeOpacity;
 
-  const avatarUrl = pin.author?.avatar_url;
+  let avatarUrl = pin.author?.avatar_url;
+  if (pin.photos && pin.photos.length > 0) {
+    const thumb = pin.photos[0].replace('.webp', '_thumb.webp');
+    avatarUrl = thumb;
+  }
   const avatarMarkup = avatarUrl
     ? `<img src="${avatarUrl}" class="marker-avatar-img" alt="" loading="lazy" onerror="this.parentNode.classList.remove('has-avatar'); this.remove();">`
     : categoryIcon;
