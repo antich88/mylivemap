@@ -129,10 +129,10 @@ else:
     # параметры пула только для Postgres (для SQLite они бессмысленны и могут ломать)
     if not DATABASE_URL.startswith("sqlite"):
         engine_kwargs.update({
-            "pool_size": 5,
-            "max_overflow": 10,
-            "pool_recycle": 280,
-            "pool_timeout": 30,
+            "pool_size": 15,
+            "max_overflow": 25,
+            "pool_recycle": 300,
+            "pool_timeout": 15,
         })
     engine_kwargs.update(_sqlite_kwargs(DATABASE_URL))
 
@@ -148,6 +148,8 @@ else:
                 "psycopg2-binary должен быть установлен для подключения к Postgres"
             ) from exc
 
+    # Повышенная емкость пула и более короткий таймаут
+    # помогают Eventlet-обработчикам не кликать по зависшим соединениям.
     ENGINE = create_engine(engine_url, **engine_kwargs)
 
     SessionLocal = sessionmaker(

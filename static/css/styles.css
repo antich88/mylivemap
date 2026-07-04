@@ -427,6 +427,8 @@ html {
   margin: 8px 0;
   overflow-x: auto;
   scrollbar-width: thin;
+  flex-shrink: 0;     /* не даём колонке сжимать блок фото */
+  min-height: 110px;  /* высота держится даже до загрузки картинок */
 }
 .pin-detail-card__photo {
   flex: 0 0 auto;
