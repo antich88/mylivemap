@@ -1002,7 +1002,8 @@ def create_app() -> Flask:
             return jsonify({"message": "Нужно войти в аккаунт, чтобы создавать метки."}), 401
         user_id = user["nickname"]
         total_pins = count_active_pins_for_user(user_id)
-        if total_pins >= USER_MARKER_LIMIT:
+        is_admin = bool(user.get("is_admin"))
+        if total_pins >= USER_MARKER_LIMIT and not is_admin:
             response = jsonify({"message": USER_LIMIT_MESSAGE})
             response.status_code = 429
             return response
